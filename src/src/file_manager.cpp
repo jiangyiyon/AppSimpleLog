@@ -167,9 +167,9 @@ bool FileManager::initialize(ProcessIdType process_id) {
     // Ensure parent directory exists
     fs::path parent_dir = base_path.parent_path();
     if (!parent_dir.empty() && !fs::exists(parent_dir)) {
-        try {
-            fs::create_directories(parent_dir);
-        } catch (const fs::filesystem_error&) {
+        std::error_code ec;
+        fs::create_directories(parent_dir, ec);
+        if (ec) {
             return false;  // Failed to create directory
         }
     }

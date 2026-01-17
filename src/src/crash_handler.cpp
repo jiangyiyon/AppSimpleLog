@@ -25,11 +25,8 @@ void CrashHandler::setFlushCallback(FlushCallback callback) {
 
 void CrashHandler::emergencyFlush() {
     if (flush_callback_) {
-        try {
-            flush_callback_();
-        } catch (...) {
-            // Ignore exceptions during crash handling
-        }
+        // Call flush callback silently - no exceptions in crash handler
+        flush_callback_();
     }
 }
 
