@@ -1,0 +1,162 @@
+{
+  "folders": [
+    {
+      "path": ".",
+      "name": "AppSimpleLog"
+    }
+  ],
+  "settings": {
+    // C++ 配置
+    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+    "C_Cpp.default.cppStandard": "c++20",
+    "C_Cpp.default.cStandard": "c11",
+    "C_Cpp.default.intelliSenseMode": "windows-msvc-x64",
+
+    // CMake 配置
+    "cmake.configureOnOpen": true,
+    "cmake.sourceDirectory": "${workspaceFolder}",
+    "cmake.buildDirectory": "${workspaceFolder}/build/${buildType}",
+    "cmake.generator": "Visual Studio 18 2026",
+    "cmake.configureArgs": [
+      "-DBUILD_TESTING=ON"
+    ],
+    "cmake.buildArgs": ["--parallel"],
+    "cmake.ctest.enableCoverage": false,
+    "cmake.ctest.args": ["--output-on-failure"],
+
+    // 编辑器设置
+    "editor.tabSize": 4,
+    "editor.insertSpaces": true,
+    "editor.formatOnSave": true,
+    "editor.rulers": [100],
+    "editor.codeActionsOnSave": {
+      "source.fixAll.clang-format": "explicit"
+    },
+    "editor.suggestSelection": "first",
+    "editor.quickSuggestions": {
+      "other": true,
+      "comments": false,
+      "strings": false
+    },
+
+    // 文件配置
+    "files.exclude": {
+      "**/.git": true,
+      "**/.svn": true,
+      "**/.hg": true,
+      "**/CVS": true,
+      "**/.DS_Store": true,
+      "**/Thumbs.db": true,
+      "**/build/**": true,
+      "**/build-*/**": true,
+      "**/install/**": true,
+      "**/*.o": true,
+      "**/*.obj": true,
+      "**/*.exe": true,
+      "**/*.dll": true,
+      "**/*.lib": true,
+      "**/*.a": true,
+      "**/*.so": true,
+      "**/*.dylib": true
+    },
+    "files.watcherExclude": {
+      "**/build/**": true,
+      "**/build-*/**": true,
+      "**/install/**": true,
+      "**/.git/objects/**": true,
+      "**/.git/subtree-cache/**": true,
+      "**/node_modules/**": true
+    },
+    "files.associations": {
+      "*.h": "cpp",
+      "*.hpp": "cpp",
+      "*.cpp": "cpp",
+      "*.cxx": "cpp",
+      "*.cc": "cpp",
+      "*.c": "c"
+    },
+
+    // 搜索配置
+    "search.exclude": {
+      "**/build/**": true,
+      "**/build-*/**": true,
+      "**/install/**": true,
+      "**/node_modules/**": true,
+      "**/*.code-search": true,
+      "**/.git/**": true
+    },
+
+    // 代码格式化
+    "C_Cpp.clang_format_style": "file",
+    "C_Cpp.clang_format_fallbackStyle": "Google",
+    "C_Cpp.formatting": "default",
+    "[cpp]": {
+      "editor.defaultFormatter": "xaver.clang-format"
+    },
+    "[c]": {
+      "editor.defaultFormatter": "xaver.clang-format"
+    },
+
+    // 终端配置
+    "terminal.integrated.defaultProfile.windows": "PowerShell",
+    "terminal.integrated.env.windows": {
+      "PATH": "${env:PATH};${workspaceFolder}"
+    },
+
+    // 问题面板
+    "problems.warningsToShowAtLaunch": "onUnambiguousFiles",
+    "problems.sortOrder": "position",
+
+    // 浏览器设置
+    "html.format.enable": false,
+    "javascript.format.enable": false,
+
+    // Git 配置
+    "git.enableSmartCommit": true,
+    "git.autofetch": true,
+    "git.confirmSync": false,
+
+    // 扩展配置
+    "extensions.ignoreRecommendations": false,
+    "extensions.showRecommendationsOnlyOnDemand": false,
+
+    // 测试资源管理器配置
+    "testing.experimentalUseTesting": true,
+
+    // 自动保存配置
+    "files.autoSave": "afterDelay",
+    "files.autoSaveDelay": 1000,
+
+    // 智能提示配置
+    "C_Cpp.errorSquiggles": "enabled",
+    "C_Cpp.autocomplete": "default",
+    "C_Cpp.intelliSenseEngine": "default",
+
+    // 性能优化
+    "C_Cpp.intelliSenseCacheSize": 1024,
+    "C_Cpp.intelliSenseCachePath": "${workspaceFolder}/.vscode/.cquery_cached_index",
+
+    // 代码检查
+    "C_Cpp.suggestSnippets": true,
+    "C_Cpp.experimentalFeatures": "enabled"
+  },
+  "extensions": {
+    "recommendations": [
+      "ms-vscode.cpptools",
+      "ms-vscode.cmake-tools",
+      "twxs.cmake",
+      "ms-vscode.cpptools-extension-pack",
+      "xaver.clang-format",
+      "matepek.vscode-test-explorer",
+      "hbenl.vscode-test-explorer",
+      "llvm-vs-code-extensions.vscode-clangd",
+      "ms-vscode.hexeditor",
+      "gruntfuggly.todo-tree",
+      "eamodio.gitlens",
+      "wakatime.vscode-wakatime"
+    ],
+    "unwantedRecommendations": [
+      "ms-vscode.cpptools-themes"
+    ]
+  }
+}

@@ -1,71 +1,218 @@
-# 技术方案说明书：高性能异步跨平台日志模块
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>技术方案说明书：高性能异步跨平台日志模块</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+            line-height: 1.8;
+            color: #333;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 40px 60px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border-radius: 8px;
+        }
+        h1 {
+            font-size: 28px;
+            color: #2c3e50;
+            margin-bottom: 10px;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 15px;
+        }
+        .meta-info {
+            background: #f8f9fa;
+            padding: 15px;
+            border-left: 4px solid #3498db;
+            margin-bottom: 30px;
+            font-size: 14px;
+            color: #555;
+        }
+        .meta-info p { margin: 5px 0; }
+        .meta-info strong { color: #2c3e50; }
+        .meta-info ul { margin: 10px 0 0 20px; }
+        .meta-info li { margin: 3px 0; }
+        h2 {
+            font-size: 22px;
+            color: #2c3e50;
+            margin: 40px 0 20px 0;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #ecf0f1;
+        }
+        h3 {
+            font-size: 18px;
+            color: #34495e;
+            margin: 25px 0 15px 0;
+        }
+        h4 {
+            font-size: 16px;
+            color: #5d6d7e;
+            margin: 20px 0 10px 0;
+        }
+        p { margin-bottom: 15px; text-align: justify; }
+        ul, ol { margin-left: 30px; margin-bottom: 15px; }
+        li { margin-bottom: 8px; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            background: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        th, td { padding: 12px 15px; text-align: left; border: 1px solid #e0e0e0; }
+        th { background: #3498db; color: white; font-weight: 600; }
+        tr:nth-child(even) { background: #f8f9fa; }
+        tr:hover { background: #ecf0f1; }
+        pre {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 15px 20px;
+            border-radius: 6px;
+            overflow-x: auto;
+            margin: 15px 0;
+            font-size: 13px;
+            line-height: 1.5;
+            font-family: "Consolas", "Monaco", "Courier New", monospace;
+        }
+        code {
+            font-family: "Consolas", "Monaco", "Courier New", monospace;
+            background: #ecf0f1;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 90%;
+            color: #e74c3c;
+        }
+        pre code {
+            background: transparent;
+            padding: 0;
+            color: inherit;
+            font-size: inherit;
+        }
+        .diagram {
+            background: #fafafa;
+            border: 1px solid #e0e0e0;
+            padding: 20px;
+            border-radius: 6px;
+            margin: 20px 0;
+            overflow-x: auto;
+        }
+        .diagram pre {
+            background: transparent;
+            color: #333;
+            padding: 0;
+            box-shadow: none;
+        }
+        hr { border: none; border-top: 2px solid #ecf0f1; margin: 40px 0; }
+        .toc {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 6px;
+            margin: 20px 0;
+        }
+        .toc h2 {
+            margin-top: 0;
+            font-size: 18px;
+            color: #2c3e50;
+            border: none;
+            padding: 0;
+        }
+        .toc ul { list-style: none; margin-left: 0; }
+        .toc li { margin-bottom: 8px; }
+        .toc a { color: #3498db; text-decoration: none; }
+        .toc a:hover { text-decoration: underline; }
+        .toc .level-1 { font-weight: 600; }
+        .toc .level-2 { margin-left: 20px; font-weight: normal; }
+        blockquote {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 0 6px 6px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>技术方案说明书：高性能异步跨平台日志模块</h1>
+        <div class="meta-info">
+            <p><strong>文档版本</strong>: v1.3</p>
+            <p><strong>创建日期</strong>: 2026-01-16</p>
+            <p><strong>更新日期</strong>: 2026-01-16</p>
+            <p><strong>更新内容</strong>:
+                <ul>
+                    <li>移除标签过滤功能，仅保留标签透传</li>
+                    <li>增强崩溃安全机制：双缓冲 + flush + 异步安全写入</li>
+                    <li>Flush间隔调整为100-500ms（适合非高频日志场景）</li>
+                    <li>简化文件句柄管理：单进程单文件模式</li>
+                    <li>数据保存率：实际场景 > 99%</li>
+                </ul>
+            </p>
+            <p><strong>项目</strong>: AppSimpleLog</p>
+            <p><strong>功能模块</strong>: 异步跨平台日志模块</p>
+            <p><strong>规格文档</strong>: <a href="spec.md">spec.md</a></p>
+        </div>
+        <hr>
+        <div class="toc">
+            <h2>目录</h2>
+            <ul>
+                <li class="level-1"><a href="#1-项目概述">1. 项目概述</a></li>
+                <li class="level-1"><a href="#2-系统架构设计">2. 系统架构设计</a></li>
+                <li class="level-1"><a href="#3-核心模块设计">3. 核心模块设计</a></li>
+                <li class="level-1"><a href="#4-数据流设计">4. 数据流设计</a></li>
+                <li class="level-1"><a href="#5-接口设计">5. 接口设计</a></li>
+                <li class="level-1"><a href="#6-性能优化策略">6. 性能优化策略</a></li>
+                <li class="level-1"><a href="#7-异常处理机制">7. 异常处理机制</a></li>
+                <li class="level-1"><a href="#8-测试策略">8. 测试策略</a></li>
+                <li class="level-1"><a href="#9-部署与运维">9. 部署与运维</a></li>
+                <li class="level-1"><a href="#10-风险评估与缓解">10. 风险评估与缓解</a></li>
+                <li class="level-1"><a href="#11-接口图">11. 接口图</a></li>
+                <li class="level-1"><a href="#12-附录">12. 附录</a></li>
+            </ul>
+        </div>
+        <hr>
 
-**文档版本**: v1.3
-**创建日期**: 2026-01-16
-**更新日期**: 2026-01-16
-**更新内容**:
-- 移除标签过滤功能，仅保留标签透传
-- 增强崩溃安全机制：双缓冲 + flush + 异步安全写入
-- Flush间隔调整为100-500ms（适合非高频日志场景）
-- 简化文件句柄管理：单进程单文件模式
-- 数据保存率：实际场景 > 99%
-**项目**: AppSimpleLog
-**功能模块**: 异步跨平台日志模块
-**规格文档**: [spec.md](./spec.md)
+        <h2 id="1-项目概述">1. 项目概述</h2>
+        <h3 id="11-项目背景">1.1 项目背景</h3>
+        <p>开发一个高性能、异步、跨平台的日志库，用于支持Windows和macOS平台（x64/arm64架构）的应用程序日志记录需求。该日志库需要提供多进程隔离、异步文件滚动、标签透传（用于后续日志查看器过滤）、ZIP归档等功能，同时满足严格性能指标（<1ms调用延迟，100K+日志吞吐量）。</p>
 
----
+        <h3 id="12-技术栈">1.2 技术栈</h3>
+        <ul>
+            <li><strong>编程语言</strong>: C++20</li>
+            <li><strong>标准库</strong>: C++20 Standard Library (std::format, std::source_location, std::atomic, std::jthread)</li>
+            <li><strong>第三方依赖</strong>: 无（零依赖设计）</li>
+            <li><strong>跨平台支持</strong>: Windows (x64/arm64), macOS (x64/arm64)</li>
+            <li><strong>接口方式</strong>: C-Bridge模式（对外暴露纯C接口，内部C++实现）</li>
+            <li><strong>测试框架</strong>: GoogleTest</li>
+            <li><strong>构建系统</strong>: CMake</li>
+        </ul>
 
-## 目录
+        <h3 id="13-核心目标">1.3 核心目标</h3>
+        <table>
+            <thead>
+                <tr><th>目标</th><th>指标</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>调用延迟</td><td>&lt; 1ms</td></tr>
+                <tr><td>日志吞吐量</td><td>100K+ 条/秒</td></tr>
+                <tr><td>并发支持</td><td>10+ 线程</td></tr>
+                <tr><td>内存占用</td><td>&lt; 200MB</td></tr>
+                <tr><td>崩溃数据保存率</td><td>≥ 90% (实际场景 &gt; 99%)</td></tr>
+                <tr><td>文件滚动时间</td><td>&lt; 100ms</td></tr>
+                <tr><td>归档性能</td><td>&lt; 5s (10MB)</td></tr>
+            </tbody>
+        </table>
 
-1. [项目概述](#1-项目概述)
-2. [系统架构设计](#2-系统架构设计)
-3. [核心模块设计](#3-核心模块设计)
-4. [数据流设计](#4-数据流设计)
-5. [接口设计](#5-接口设计)
-6. [性能优化策略](#6-性能优化策略)
-7. [异常处理机制](#7-异常处理机制)
-8. [测试策略](#8-测试策略)
-9. [部署与运维](#9-部署与运维)
-10. [风险评估与缓解](#10-风险评估与缓解)
-
----
-
-## 1. 项目概述
-
-### 1.1 项目背景
-
-开发一个高性能、异步、跨平台的日志库，用于支持Windows和macOS平台（x64/arm64架构）的应用程序日志记录需求。该日志库需要提供多进程隔离、异步文件滚动、标签透传（用于后续日志查看器过滤）、ZIP归档等功能，同时满足严格性能指标（<1ms调用延迟，100K+日志吞吐量）。
-
-### 1.2 技术栈
-
-- **编程语言**: C++20
-- **标准库**: C++20 Standard Library (std::format, std::source_location, std::atomic, std::jthread)
-- **第三方依赖**: 无（零依赖设计）
-- **跨平台支持**: Windows (x64/arm64), macOS (x64/arm64)
-- **接口方式**: C-Bridge模式（对外暴露纯C接口，内部C++实现）
-- **测试框架**: GoogleTest
-- **构建系统**: CMake
-
-### 1.3 核心目标
-
-| 目标 | 指标 |
-|------|------|
-| 调用延迟 | < 1ms |
-| 日志吞吐量 | 100K+ 条/秒 |
-| 并发支持 | 10+ 线程 |
-| 内存占用 | < 200MB |
-| 崩溃数据保存率 | ≥ 90% (实际场景 > 99%) |
-| 文件滚动时间 | < 100ms |
-| 归档性能 | < 5s (10MB) |
-
----
-
-## 2. 系统架构设计
-
-### 2.1 整体架构
-
-```
-┌─────────────────────────────────────────────────────────────┐
+        <h2 id="2-系统架构设计">2. 系统架构设计</h2>
+        <h3 id="21-整体架构">2.1 整体架构</h3>
+        <div class="diagram"><pre>┌─────────────────────────────────────────────────────────────┐
 │                      应用层 (C/C++/ObjC)                      │
 └─────────────────────────────────────────────────────────────┘
                               │
@@ -115,28 +262,22 @@
 │                    存储层 (本地文件系统)                       │
 │  • 文本日志文件 (A.log, A.1.log, ...)                        │
 │  • ZIP归档文件 (A_1234_20230116120000.zip)                   │
-└─────────────────────────────────────────────────────────────┘
-```
+└─────────────────────────────────────────────────────────────┘</pre></div>
 
-### 2.2 架构原则
+        <h3 id="22-架构原则">2.2 架构原则</h3>
+        <ol>
+            <li><strong>分层设计</strong>: 应用层、C-Bridge层、C++实现层、异步层、存储层</li>
+            <li><strong>职责分离</strong>: 每个模块职责单一，高内聚低耦合</li>
+            <li><strong>异步优先</strong>: 日志调用快速返回，后台异步写入</li>
+            <li><strong>资源预分配</strong>: 初始化时分配所有资源，运行时避免动态内存分配</li>
+            <li><strong>崩溃安全</strong>: 通过环形缓冲区和信号处理机制保证崩溃时数据不丢失</li>
+        </ol>
 
-1. **分层设计**: 应用层、C-Bridge层、C++实现层、异步层、存储层
-2. **职责分离**: 每个模块职责单一，高内聚低耦合
-3. **异步优先**: 日志调用快速返回，后台异步写入
-4. **资源预分配**: 初始化时分配所有资源，运行时避免动态内存分配
-5. **崩溃安全**: 通过环形缓冲区和信号处理机制保证崩溃时数据不丢失
-
----
-
-## 3. 核心模块设计
-
-### 3.1 日志条目 (LogEntry)
-
-**职责**: 封装单条日志的所有信息，提供格式化输出
-
-**数据结构**:
-```cpp
-struct LogEntry {
+        <h2 id="3-核心模块设计">3. 核心模块设计</h2>
+        <h3 id="31-日志条目-logentry">3.1 日志条目 (LogEntry)</h3>
+        <p><strong>职责</strong>: 封装单条日志的所有信息，提供格式化输出</p>
+        <p><strong>数据结构</strong>:</p>
+        <pre><code>struct LogEntry {
     LogLevel level;              // 日志级别
     std::chrono::system_clock::time_point timestamp;  // 时间戳
     uint32_t process_id;         // 进程ID
@@ -147,22 +288,19 @@ struct LogEntry {
     
     // 格式化为日志字符串
     std::string format() const;
-};
-```
+};</code></pre>
+        <p><strong>设计要点</strong>:</p>
+        <ul>
+            <li>使用 <code>std::string_view</code> 传递字符串，减少拷贝</li>
+            <li>时间戳使用 <code>std::chrono::system_clock::time_point</code>，精度到毫秒</li>
+            <li><code>std::source_location</code> 在宏展开时捕获调用位置信息</li>
+            <li>提供 <code>format()</code> 方法按照规范格式输出日志</li>
+        </ul>
 
-**设计要点**:
-- 使用 `std::string_view` 传递字符串，减少拷贝
-- 时间戳使用 `std::chrono::system_clock::time_point`，精度到毫秒
-- `std::source_location` 在宏展开时捕获调用位置信息
-- 提供 `format()` 方法按照规范格式输出日志
-
-### 3.2 日志缓冲区 (LogBuffer)
-
-**职责**: 提供崩溃安全的环形缓冲区，保存未写入磁盘的日志
-
-**数据结构**:
-```cpp
-class LogBuffer {
+        <h3 id="32-日志缓冲区-logbuffer">3.2 日志缓冲区 (LogBuffer)</h3>
+        <p><strong>职责</strong>: 提供崩溃安全的环形缓冲区，保存未写入磁盘的日志</p>
+        <p><strong>数据结构</strong>:</p>
+        <pre><code>class LogBuffer {
 public:
     explicit LogBuffer(size_t capacity);
     ~LogBuffer();
@@ -189,25 +327,22 @@ private:
     size_t capacity_;
     std::mutex mutex_;  // 用于 full_flush
     std::FILE* log_file_;  // 日志文件句柄（初始化时打开）
-};
-```
+};</code></pre>
+        <p><strong>设计要点</strong>:</p>
+        <ul>
+            <li><strong>双缓冲机制</strong>：使用 <code>write_cursor_</code> 跟踪已写入文件的位置，避免重复写入</li>
+            <li><strong>快速flush (quick_flush)</strong>：仅写入 <code>write_cursor_</code> 到 <code>head_</code> 之间的新日志，使用 <code>std::fwrite</code>（异步安全）</li>
+            <li><strong>完整flush (full_flush)</strong>：正常退出时调用，写入所有缓冲区数据</li>
+            <li><strong>缓冲区满时自动flush</strong>：当缓冲区使用率 &gt; 80% 时自动触发写入</li>
+            <li><strong>环形缓冲区实现</strong>，预分配固定容量（例如10000条）</li>
+            <li>使用 <code>std::atomic</code> 实现无锁的 push/pop 操作</li>
+            <li>文件句柄在日志器初始化时打开，进程生命周期内保持打开</li>
+        </ul>
 
-**设计要点**:
-- **双缓冲机制**：使用 `write_cursor_` 跟踪已写入文件的位置，避免重复写入
-- **快速flush (quick_flush)**：仅写入 `write_cursor_` 到 `head_` 之间的新日志，使用 `std::fwrite`（异步安全）
-- **完整flush (full_flush)**：正常退出时调用，写入所有缓冲区数据
-- **缓冲区满时自动flush**：当缓冲区使用率 > 80% 时自动触发写入
-- **环形缓冲区实现**，预分配固定容量（例如10000条）
-- 使用 `std::atomic` 实现无锁的 push/pop 操作
-- 文件句柄在日志器初始化时打开，进程生命周期内保持打开
-
-### 3.3 文件管理器 (FileManager)
-
-**职责**: 管理日志文件的创建、滚动、删除和重命名
-
-**数据结构**:
-```cpp
-class FileManager {
+        <h3 id="33-文件管理器-filemanager">3.3 文件管理器 (FileManager)</h3>
+        <p><strong>职责</strong>: 管理日志文件的创建、滚动、删除和重命名</p>
+        <p><strong>数据结构</strong>:</p>
+        <pre><code>class FileManager {
 public:
     FileManager(const std::string& base_name, 
                 size_t max_file_size = 10 * 1024 * 1024,
@@ -230,33 +365,33 @@ private:
     void create_new_file();
     void rotate_history_files();
     std::string generate_filename(uint32_t pid = 0) const;
-};
-```
+};</code></pre>
+        <p><strong>设计要点</strong>:</p>
+        <ul>
+            <li>监控当前文件大小，达到 <code>max_file_size</code> 时触发滚动</li>
+            <li>滚动逻辑：A.log → A.1.log → A.2.log → A.3.log → (删除)</li>
+            <li>使用 <code>std::filesystem</code> 处理跨平台文件路径</li>
+            <li>提供归档接口，将所有日志文件打包成ZIP</li>
+        </ul>
 
-**设计要点**:
-- 监控当前文件大小，达到 `max_file_size` 时触发滚动
-- 滚动逻辑：A.log → A.1.log → A.2.log → A.3.log → (删除)
-- 使用 `std::filesystem` 处理跨平台文件路径
-- 提供归档接口，将所有日志文件打包成ZIP
+        <h3 id="34-归档模块-archive">3.4 归档模块 (Archive)</h3>
+        <p><strong>职责</strong>: 将日志文件压缩成ZIP格式</p>
+        <p><strong>设计要点</strong>:</p>
+        <ul>
+            <li>由于零依赖要求，使用平台原生API：
+                <ul>
+                    <li>Windows: <code>CreateZipFile</code> / IZipArchive</li>
+                    <li>macOS: <code>zip</code> 命令或 <code>zlib</code> (如果系统自带)</li>
+                </ul>
+            </li>
+            <li>归档后删除原始文件</li>
+            <li>线程安全，支持并发调用</li>
+        </ul>
 
-### 3.4 归档模块 (Archive)
-
-**职责**: 将日志文件压缩成ZIP格式
-
-**设计要点**:
-- 由于零依赖要求，使用平台原生API：
-  - Windows: `CreateZipFile` / IZipArchive
-  - macOS: `zip` 命令或 `zlib` (如果系统自带)
-- 归档后删除原始文件
-- 线程安全，支持并发调用
-
-### 3.5 崩溃处理器 (CrashHandler)
-
-**职责**: 注册信号处理程序，在程序崩溃时保护日志数据
-
-**数据结构**:
-```cpp
-class CrashHandler {
+        <h3 id="35-崩溃处理器-crashhandler">3.5 崩溃处理器 (CrashHandler)</h3>
+        <p><strong>职责</strong>: 注册信号处理程序，在程序崩溃时保护日志数据</p>
+        <p><strong>数据结构</strong>:</p>
+        <pre><code>class CrashHandler {
 public:
     static void install(LogBuffer* buffer);
     static void uninstall();
@@ -264,23 +399,20 @@ public:
 private:
     static void signal_handler(int signal);
     static LogBuffer* log_buffer_;
-};
-```
+};</code></pre>
+        <p><strong>设计要点</strong>:</p>
+        <ul>
+            <li>注册以下信号：SIGSEGV, SIGABRT, SIGFPE, SIGILL</li>
+            <li>信号处理程序中调用 <code>LogBuffer::quick_flush()</code> 快速写入新日志</li>
+            <li>仅使用异步安全的函数：<code>write()</code>、<code>fprintf()</code>、<code>fflush()</code></li>
+            <li>文件句柄在日志器初始化时打开，进程生命周期内保持打开</li>
+            <li>使用 <code>std::atomic_flag</code> 防止重复处理</li>
+        </ul>
 
-**设计要点**:
-- 注册以下信号：SIGSEGV, SIGABRT, SIGFPE, SIGILL
-- 信号处理程序中调用 `LogBuffer::quick_flush()` 快速写入新日志
-- 仅使用异步安全的函数：`write()`、`fprintf()`、`fflush()`
-- 文件句柄在日志器初始化时打开，进程生命周期内保持打开
-- 使用 `std::atomic_flag` 防止重复处理
-
-### 3.6 日志管理器 (LogManager)
-
-**职责**: 管理日志器的生命周期和全局状态
-
-**数据结构**:
-```cpp
-class LogManager {
+        <h3 id="36-日志管理器-logmanager">3.6 日志管理器 (LogManager)</h3>
+        <p><strong>职责</strong>: 管理日志器的生命周期和全局状态</p>
+        <p><strong>数据结构</strong>:</p>
+        <pre><code>class LogManager {
 public:
     static Logger* create_logger(const LoggerConfig& config);
     static void destroy_logger(Logger* logger);
@@ -292,22 +424,17 @@ private:
     static std::atomic<bool> initialized_;
     static std::mutex mutex_;
     static std::vector<std::unique_ptr<Logger>> loggers_;
-};
-```
+};</code></pre>
+        <p><strong>设计要点</strong>:</p>
+        <ul>
+            <li>单例模式管理所有日志器实例</li>
+            <li>提供全局初始化/清理接口</li>
+            <li>保证线程安全</li>
+        </ul>
 
-**设计要点**:
-- 单例模式管理所有日志器实例
-- 提供全局初始化/清理接口
-- 保证线程安全
-
----
-
-## 4. 数据流设计
-
-### 4.1 日志写入流程
-
-```
-应用调用日志接口
+        <h2 id="4-数据流设计">4. 数据流设计</h2>
+        <h3 id="41-日志写入流程">4.1 日志写入流程</h3>
+        <div class="diagram"><pre>应用调用日志接口
       │
       ▼
 C-Bridge API: speckit_logger_log()
@@ -352,13 +479,10 @@ C-Bridge API: speckit_logger_log()
 写入当前日志文件
       │
       ▼
-检查文件大小 → 触发滚动（如需要）
-```
+检查文件大小 → 触发滚动（如需要）</pre></div>
 
-### 4.2 崩溃恢复流程
-
-```
-程序崩溃
+        <h3 id="42-崩溃恢复流程">4.2 崩溃恢复流程</h3>
+        <div class="diagram"><pre>程序崩溃
       │
       ▼
 操作系统发送信号 (SIGSEGV/SIGABRT等)
@@ -380,13 +504,10 @@ C-Bridge API: speckit_logger_log()
 更新 write_cursor_
       │
       ▼
-程序终止
-```
+程序终止</pre></div>
 
-### 4.3 文件滚动流程
-
-```
-写入日志到当前文件
+        <h3 id="43-文件滚动流程">4.3 文件滚动流程</h3>
+        <div class="diagram"><pre>写入日志到当前文件
       │
       ▼
 检查文件大小
@@ -404,13 +525,10 @@ C-Bridge API: speckit_logger_log()
 创建新的 A.log
       │
       ▼
-继续写入
-```
+继续写入</pre></div>
 
-### 4.4 归档流程
-
-```
-调用归档接口
+        <h3 id="44-归档流程">4.4 归档流程</h3>
+        <div class="diagram"><pre>调用归档接口
       │
       ▼
 列出所有日志文件
@@ -430,19 +548,12 @@ C-Bridge API: speckit_logger_log()
 创建新的空 A.log
       │
       ▼
-归档完成
-```
+归档完成</pre></div>
 
----
-
-## 5. 接口设计
-
-### 5.1 C-Bridge API 接口
-
-#### 5.1.1 数据类型定义
-
-```c
-#ifdef __cplusplus
+        <h2 id="5-接口设计">5. 接口设计</h2>
+        <h3 id="51-c-bridge-api-接口">5.1 C-Bridge API 接口</h3>
+        <h4 id="511-数据类型定义">5.1.1 数据类型定义</h4>
+        <pre><code>#ifdef __cplusplus
 extern "C" {
 #endif
 
@@ -480,13 +591,10 @@ typedef enum {
 
 #ifdef __cplusplus
 }
-#endif
-```
+#endif</code></pre>
 
-#### 5.1.2 核心接口
-
-```c
-/**
+        <h4 id="512-核心接口">5.1.2 核心接口</h4>
+        <pre><code>/**
  * 创建日志器实例
  * @param config 配置参数
  * @return 日志器句柄，失败返回 NULL
@@ -547,15 +655,11 @@ int speckit_logger_flush(SpeckitLogger* logger);
 int speckit_logger_get_stats(SpeckitLogger* logger,
                               size_t* total_logs,
                               size_t* dropped_logs,
-                              size_t* buffer_size);
-```
+                              size_t* buffer_size);</code></pre>
 
-### 5.2 C++ 内部接口
-
-#### 5.2.1 Logger 类
-
-```cpp
-namespace speckit::log {
+        <h3 id="52-c-内部接口">5.2 C++ 内部接口</h3>
+        <h4 id="521-logger-类">5.2.1 Logger 类</h4>
+        <pre><code>namespace speckit::log {
 
 class Logger {
 public:
@@ -605,77 +709,87 @@ private:
     bool should_log(LogLevel level) const;
 };
 
-} // namespace speckit::log
-```
+} // namespace speckit::log</code></pre>
 
----
+        <h2 id="6-性能优化策略">6. 性能优化策略</h2>
+        <h3 id="61-调用延迟优化-1-ms">6.1 调用延迟优化 (< 1ms)</h3>
+        <table>
+            <thead>
+                <tr><th>优化措施</th><th>实现方式</th><th>预期效果</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>级别过滤前置</td><td>在构造 LogEntry 之前检查级别，快速返回</td><td>减少 80% 无效调用开销</td></tr>
+                <tr><td>无锁队列</td><td>使用 <code>std::atomic</code> 实现无锁队列，避免互斥锁竞争</td><td>减少 60% 并发开销</td></tr>
+                <tr><td>字符串视图</td><td>使用 <code>std::string_view</code> 传递字符串，避免深拷贝</td><td>减少 70% 内存拷贝</td></tr>
+                <tr><td>资源预分配</td><td>初始化时分配所有内存和缓冲区，运行时零分配</td><td>消除动态分配开销</td></tr>
+                <tr><td>批量写入</td><td>后台线程批量写入文件，减少 I/O 系统调用</td><td>减少 90% I/O 开销</td></tr>
+            </tbody>
+        </table>
 
-## 6. 性能优化策略
+        <h3 id="62-吞吐量优化-100k-logssec">6.2 吞吐量优化 (100K+ logs/sec)</h3>
+        <table>
+            <thead>
+                <tr><th>优化措施</th><th>实现方式</th><th>预期效果</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>异步写入</td><td>单一后台线程集中处理写入操作</td><td>解耦业务逻辑和 I/O</td></tr>
+                <tr><td>缓冲区大小</td><td>设置足够大的缓冲区（10000+ 条）</td><td>吸收突发流量</td></tr>
+                <tr><td>文件滚动优化</td><td>原子操作快速切换文件</td><td>滚动时间 &lt; 100ms</td></tr>
+                <tr><td>格式化优化</td><td>使用 <code>std::format</code> 编译期格式字符串</td><td>减少 50% 格式化时间</td></tr>
+                <tr><td>日志池</td><td>使用对象池复用 LogEntry 对象</td><td>减少内存分配</td></tr>
+            </tbody>
+        </table>
 
-### 6.1 调用延迟优化 (< 1ms)
+        <h3 id="63-内存优化-200-mb">6.3 内存优化 (< 200MB)</h3>
+        <table>
+            <thead>
+                <tr><th>优化措施</th><th>实现方式</th><th>预期效果</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>固定大小缓冲区</td><td>预分配固定容量，运行时不扩容</td><td>内存占用可预测</td></tr>
+                <tr><td>字符串池</td><td>复用常用字符串（标签名等）</td><td>减少 30% 字符串内存</td></tr>
+                <tr><td>及时释放</td><td>滚动后立即关闭旧文件句柄</td><td>避免文件句柄泄漏</td></tr>
+                <tr><td>智能指针</td><td>使用 <code>std::unique_ptr</code> 管理资源</td><td>自动释放，无泄漏</td></tr>
+            </tbody>
+        </table>
 
-| 优化措施 | 实现方式 | 预期效果 |
-|---------|---------|---------|
-| 级别过滤前置 | 在构造 LogEntry 之前检查级别，快速返回 | 减少 80% 无效调用开销 |
-| 无锁队列 | 使用 `std::atomic` 实现无锁队列，避免互斥锁竞争 | 减少 60% 并发开销 |
-| 字符串视图 | 使用 `std::string_view` 传递字符串，避免深拷贝 | 减少 70% 内存拷贝 |
-| 资源预分配 | 初始化时分配所有内存和缓冲区，运行时零分配 | 消除动态分配开销 |
-| 批量写入 | 后台线程批量写入文件，减少 I/O 系统调用 | 减少 90% I/O 开销 |
+        <h3 id="64-崩溃安全优化-90-保存率实际场景-99">6.4 崩溃安全优化 (≥ 90% 保存率，实际场景 > 99%)</h3>
+        <table>
+            <thead>
+                <tr><th>优化措施</th><th>实现方式</th><th>预期效果</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>双缓冲机制</td><td>使用 write_cursor_ 跟踪已写入位置</td><td>避免重复写入，快速flush</td></tr>
+                <tr><td>环形缓冲区</td><td>所有日志先入缓冲区，再写入磁盘</td><td>崩溃时保留未写日志</td></tr>
+                <tr><td>信号处理</td><td>注册崩溃信号处理程序</td><td>触发紧急flush</td></tr>
+                <tr><td>高频flush</td><td>后台线程定期 flush（每100-500ms）</td><td>缩小丢失窗口至 &lt;100条</td></tr>
+                <tr><td>自动flush触发</td><td>缓冲区使用率 &gt; 80% 时自动flush</td><td>高频写入时避免丢失</td></tr>
+                <tr><td>异步安全flush</td><td>仅使用 fprintf/fflush 等异步安全函数</td><td>崩溃时能可靠写入</td></tr>
+                <tr><td>文件句柄管理</td><td>文件句柄在初始化时打开，生命周期内保持</td><td>避免崩溃时文件操作失败</td></tr>
+                <tr><td>原子操作</td><td>使用原子变量保证数据一致性</td><td>避免数据损坏</td></tr>
+            </tbody>
+        </table>
 
-### 6.2 吞吐量优化 (100K+ logs/sec)
+        <h2 id="7-异常处理机制">7. 异常处理机制</h2>
+        <h3 id="71-错误处理策略">7.1 错误处理策略</h3>
+        <table>
+            <thead>
+                <tr><th>错误类型</th><th>处理方式</th><th>用户反馈</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>无效参数</td><td>返回 <code>SPECKIT_ERROR_INVALID_ARGUMENT</code>，不写入日志</td><td>明确错误码</td></tr>
+                <tr><td>文件权限不足</td><td>返回 <code>SPECKIT_ERROR_PERMISSION_DENIED</code>，停止写入</td><td>明确错误码</td></tr>
+                <tr><td>磁盘空间不足</td><td>返回 <code>SPECKIT_ERROR_DISK_FULL</code>，丢弃新日志</td><td>明确错误码</td></tr>
+                <tr><td>缓冲区满</td><td>返回 <code>SPECKIT_ERROR_BUFFER_FULL</code>，丢弃新日志</td><td>明确错误码</td></tr>
+                <tr><td>文件写入失败</td><td>重试3次，失败后返回错误</td><td>记录错误日志</td></tr>
+                <tr><td>归档失败</td><td>保留原始文件，返回错误</td><td>记录错误日志</td></tr>
+                <tr><td>未知错误</td><td>返回 <code>SPECKIT_ERROR_UNKNOWN</code></td><td>记录错误日志</td></tr>
+            </tbody>
+        </table>
 
-| 优化措施 | 实现方式 | 预期效果 |
-|---------|---------|---------|
-| 异步写入 | 单一后台线程集中处理写入操作 | 解耦业务逻辑和 I/O |
-| 缓冲区大小 | 设置足够大的缓冲区（10000+ 条） | 吸收突发流量 |
-| 文件滚动优化 | 原子操作快速切换文件 | 滚动时间 < 100ms |
-| 格式化优化 | 使用 `std::format` 编译期格式字符串 | 减少 50% 格式化时间 |
-| 日志池 | 使用对象池复用 LogEntry 对象 | 减少内存分配 |
-
-### 6.3 内存优化 (< 200MB)
-
-| 优化措施 | 实现方式 | 预期效果 |
-|---------|---------|---------|
-| 固定大小缓冲区 | 预分配固定容量，运行时不扩容 | 内存占用可预测 |
-| 字符串池 | 复用常用字符串（标签名等） | 减少 30% 字符串内存 |
-| 及时释放 | 滚动后立即关闭旧文件句柄 | 避免文件句柄泄漏 |
-| 智能指针 | 使用 `std::unique_ptr` 管理资源 | 自动释放，无泄漏 |
-
-### 6.4 崩溃安全优化 (≥ 90% 保存率，实际场景 > 99%)
-
-| 优化措施 | 实现方式 | 预期效果 |
-|---------|---------|---------|
-| 双缓冲机制 | 使用 write_cursor_ 跟踪已写入位置 | 避免重复写入，快速flush |
-| 环形缓冲区 | 所有日志先入缓冲区，再写入磁盘 | 崩溃时保留未写日志 |
-| 信号处理 | 注册崩溃信号处理程序 | 触发紧急flush |
-| 高频flush | 后台线程定期 flush（每100-500ms） | 缩小丢失窗口至 <100条 |
-| 自动flush触发 | 缓冲区使用率 > 80% 时自动flush | 高频写入时避免丢失 |
-| 异步安全flush | 仅使用 fprintf/fflush 等异步安全函数 | 崩溃时能可靠写入 |
-| 文件句柄管理 | 文件句柄在初始化时打开，生命周期内保持 | 避免崩溃时文件操作失败 |
-| 原子操作 | 使用原子变量保证数据一致性 | 避免数据损坏 |
-
----
-
-## 7. 异常处理机制
-
-### 7.1 错误处理策略
-
-| 错误类型 | 处理方式 | 用户反馈 |
-|---------|---------|---------|
-| 无效参数 | 返回 `SPECKIT_ERROR_INVALID_ARGUMENT`，不写入日志 | 明确错误码 |
-| 文件权限不足 | 返回 `SPECKIT_ERROR_PERMISSION_DENIED`，停止写入 | 明确错误码 |
-| 磁盘空间不足 | 返回 `SPECKIT_ERROR_DISK_FULL`，丢弃新日志 | 明确错误码 |
-| 缓冲区满 | 返回 `SPECKIT_ERROR_BUFFER_FULL`，丢弃新日志 | 明确错误码 |
-| 文件写入失败 | 重试3次，失败后返回错误 | 记录错误日志 |
-| 归档失败 | 保留原始文件，返回错误 | 记录错误日志 |
-| 未知错误 | 返回 `SPECKIT_ERROR_UNKNOWN` | 记录错误日志 |
-
-### 7.2 异常场景处理
-
-#### 7.2.1 磁盘空间不足
-
-```cpp
-void FileManager::write(const std::string& content) {
+        <h3 id="72-异常场景处理">7.2 异常场景处理</h3>
+        <h4 id="721-磁盘空间不足">7.2.1 磁盘空间不足</h4>
+        <pre><code>void FileManager::write(const std::string& content) {
     try {
         if (current_file_.is_open()) {
             current_file_ << content << std::flush;
@@ -688,13 +802,10 @@ void FileManager::write(const std::string& content) {
         }
         throw;
     }
-}
-```
+}</code></pre>
 
-#### 7.2.2 文件权限问题
-
-```cpp
-void FileManager::create_new_file() {
+        <h4 id="722-文件权限问题">7.2.2 文件权限问题</h4>
+        <pre><code>void FileManager::create_new_file() {
     auto path = generate_filename();
     std::ofstream file(path, std::ios::app);
     if (!file.is_open()) {
@@ -703,13 +814,10 @@ void FileManager::create_new_file() {
     current_file_ = std::move(file);
     current_file_path_ = path;
     current_file_size_ = 0;
-}
-```
+}</code></pre>
 
-#### 7.2.3 进程崩溃
-
-```cpp
-void CrashHandler::signal_handler(int signal) {
+        <h4 id="723-进程崩溃">7.2.3 进程崩溃</h4>
+        <pre><code>void CrashHandler::signal_handler(int signal) {
     // 防止重复处理
     static std::atomic_flag in_handler = ATOMIC_FLAG_INIT;
     if (in_handler.test_and_set()) return;
@@ -742,33 +850,31 @@ void LogBuffer::quick_flush() {
     
     // 更新写入位置
     write_cursor_.store(current_head, std::memory_order_release);
-}
-```
+}</code></pre>
 
-#### 7.2.4 崩溃安全机制详解
-
-为确保CRASH时日志不丢失，我们采用多重保障机制：
-
-**多层flush策略**
-
-| 触发条件 | Flush类型 | 间隔时间 | 丢失窗口 |
-|---------|----------|---------|---------|
-| 缓冲区使用率 > 80% | Quick Flush | 实时触发 | 0条 |
-| 后台线程定期 | Quick Flush | 100-500ms | <100条 |
-| 程序正常退出 | Full Flush | 一次性 | 0条 |
-| 信号触发（CRASH） | Quick Flush | 立即 | <100条 |
-
-**异步安全保证**
-
-信号处理程序中仅使用以下异步安全函数：
-- `fprintf()` - 写入格式化字符串
-- `fflush()` - 刷新缓冲区到磁盘
-- `write()` - 底层系统调用（备选）
-
-**数据保存率估算**
-
-```
-假设场景：高频写入 10K logs/s，缓冲区 10000 条
+        <h4 id="724-崩溃安全机制详解">7.2.4 崩溃安全机制详解</h4>
+        <p>为确保CRASH时日志不丢失，我们采用多重保障机制：</p>
+        <p><strong>多层flush策略</strong></p>
+        <table>
+            <thead>
+                <tr><th>触发条件</th><th>Flush类型</th><th>间隔时间</th><th>丢失窗口</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>缓冲区使用率 &gt; 80%</td><td>Quick Flush</td><td>实时触发</td><td>0条</td></tr>
+                <tr><td>后台线程定期</td><td>Quick Flush</td><td>100-500ms</td><td>&lt;100条</td></tr>
+                <tr><td>程序正常退出</td><td>Full Flush</td><td>一次性</td><td>0条</td></tr>
+                <tr><td>信号触发（CRASH）</td><td>Quick Flush</td><td>立即</td><td>&lt;100条</td></tr>
+            </tbody>
+        </table>
+        <p><strong>异步安全保证</strong></p>
+        <p>信号处理程序中仅使用以下异步安全函数：</p>
+        <ul>
+            <li><code>fprintf()</code> - 写入格式化字符串</li>
+            <li><code>fflush()</code> - 刷新缓冲区到磁盘</li>
+            <li><code>write()</code> - 底层系统调用（备选）</li>
+        </ul>
+        <p><strong>数据保存率估算</strong></p>
+        <pre><code>假设场景：高频写入 10K logs/s，缓冲区 10000 条
 Flush 间隔：100ms
 
 最大丢失日志数 = 写入速率 × Flush 间隔
@@ -781,119 +887,128 @@ Flush 间隔：100ms
 
 实际场景（非高频）：日志频率通常 < 1K logs/s
 最大丢失日志数 = 1,000 logs/s × 0.1s = 100 logs
-数据保存率 = 99%+
-```
+数据保存率 = 99%+</code></pre>
+        <p><strong>关键设计决策</strong></p>
+        <ol>
+            <li><strong>使用 FILE* 而非 std::ofstream</strong>：
+                <ul>
+                    <li><code>fprintf()</code> 是异步安全的</li>
+                    <li><code>std::ofstream</code> 可能在信号处理中失效</li>
+                </ul>
+            </li>
+            <li><strong>文件句柄管理</strong>：
+                <ul>
+                    <li>日志器初始化时打开文件</li>
+                    <li>进程生命周期内保持打开状态</li>
+                    <li>避免崩溃时文件操作失败</li>
+                    <li>单进程单文件模式，无需考虑多进程共享</li>
+                </ul>
+            </li>
+            <li><strong>双缓冲 write_cursor_</strong>：
+                <ul>
+                    <li>跟踪已写入文件的位置</li>
+                    <li>quick_flush 只写入新数据</li>
+                    <li>避免重复写入和格式化开销</li>
+                </ul>
+            </li>
+        </ol>
 
-**关键设计决策**
+        <h3 id="73-降级策略">7.3 降级策略</h3>
+        <table>
+            <thead>
+                <tr><th>场景</th><th>降级措施</th><th>说明</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>队列满</td><td>丢弃新日志</td><td>保证系统不崩溃</td></tr>
+                <tr><td>磁盘满</td><td>停止写入，记录错误</td><td>避免数据损坏</td></tr>
+                <tr><td>文件权限失败</td><td>切换到备用路径</td><td>尝试其他目录</td></tr>
+                <tr><td>内存不足</td><td>缩小缓冲区</td><td>降低容量继续运行</td></tr>
+                <tr><td>归档失败</td><td>保留原始文件</td><td>不影响日志写入</td></tr>
+            </tbody>
+        </table>
 
-1. **使用 FILE* 而非 std::ofstream**：
-   - `fprintf()` 是异步安全的
-   - `std::ofstream` 可能在信号处理中失效
+        <h2 id="8-测试策略">8. 测试策略</h2>
+        <h3 id="81-单元测试">8.1 单元测试</h3>
+        <table>
+            <thead>
+                <tr><th>测试模块</th><th>测试覆盖</th><th>工具</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>LogEntry</td><td>格式化、数据完整性</td><td>GoogleTest</td></tr>
+                <tr><td>LogBuffer</td><td>push/pop、环形逻辑、quick_flush、边界条件</td><td>GoogleTest</td></tr>
+                <tr><td>FileManager</td><td>文件创建、滚动、删除</td><td>GoogleTest + Mock filesystem</td></tr>
+                <tr><td>CrashHandler</td><td>信号处理、quick_flush</td><td>GoogleTest + 信号注入</td></tr>
+            </tbody>
+        </table>
 
-2. **文件句柄管理**：
-   - 日志器初始化时打开文件
-   - 进程生命周期内保持打开状态
-   - 避免崩溃时文件操作失败
-   - 单进程单文件模式，无需考虑多进程共享
+        <h3 id="82-集成测试">8.2 集成测试</h3>
+        <table>
+            <thead>
+                <tr><th>测试场景</th><th>测试目标</th><th>工具</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>异步日志写入</td><td>验证后台线程正确写入</td><td>多线程测试程序</td></tr>
+                <tr><td>文件滚动</td><td>验证滚动逻辑和原子性</td><td>填充日志文件</td></tr>
+                <tr><td>多进程隔离</td><td>验证进程间日志不干扰</td><td>启动多个进程</td></tr>
+                <tr><td>日志归档</td><td>验证ZIP打包和文件删除</td><td>归档接口调用</td></tr>
+                <tr><td>崩溃恢复</td><td>验证崩溃时数据保存</td><td>触发崩溃信号</td></tr>
+            </tbody>
+        </table>
 
-3. **双缓冲 write_cursor_**：
-   - 跟踪已写入文件的位置
-   - quick_flush 只写入新数据
-   - 避免重复写入和格式化开销
+        <h3 id="83-性能测试">8.3 性能测试</h3>
+        <table>
+            <thead>
+                <tr><th>测试指标</th><th>测试方法</th><th>目标值</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>调用延迟</td><td>测量 <code>log()</code> 函数耗时</td><td>&lt; 1ms</td></tr>
+                <tr><td>吞吐量</td><td>持续写入日志，测量条/秒</td><td>&gt; 100K 条/秒</td></tr>
+                <tr><td>并发性能</td><td>多线程并发写入，测量性能下降</td><td>&lt; 20% 下降</td></tr>
+                <tr><td>内存占用</td><td>长时间运行，监控内存</td><td>&lt; 200MB</td></tr>
+                <tr><td>文件滚动</td><td>测量滚动操作耗时</td><td>&lt; 100ms</td></tr>
+                <tr><td>归档性能</td><td>归档 10MB 日志</td><td>&lt; 5s</td></tr>
+            </tbody>
+        </table>
 
-### 7.3 降级策略
+        <h3 id="84-压力测试">8.4 压力测试</h3>
+        <table>
+            <thead>
+                <tr><th>测试场景</th><th>测试方法</th><th>预期结果</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>高频写入</td><td>100K+ 条/秒持续写入</td><td>不丢失、不重复</td></tr>
+                <tr><td>长时间运行</td><td>24小时连续运行</td><td>无内存泄漏、性能稳定</td></tr>
+                <tr><td>极端并发</td><td>50+ 线程同时写入</td><td>系统稳定</td></tr>
+                <tr><td>磁盘满</td><td>模拟磁盘空间耗尽</td><td>优雅降级，不崩溃</td></tr>
+                <tr><td>快速崩溃</td><td>循环触发崩溃信号</td><td>90%+ 数据保存</td></tr>
+            </tbody>
+        </table>
 
-| 场景 | 降级措施 | 说明 |
-|------|---------|------|
-| 队列满 | 丢弃新日志 | 保证系统不崩溃 |
-| 磁盘满 | 停止写入，记录错误 | 避免数据损坏 |
-| 文件权限失败 | 切换到备用路径 | 尝试其他目录 |
-| 内存不足 | 缩小缓冲区 | 降低容量继续运行 |
-| 归档失败 | 保留原始文件 | 不影响日志写入 |
-
----
-
-## 8. 测试策略
-
-### 8.1 单元测试
-
-| 测试模块 | 测试覆盖 | 工具 |
-|---------|---------|------|
-| LogEntry | 格式化、数据完整性 | GoogleTest |
-| LogBuffer | push/pop、环形逻辑、quick_flush、边界条件 | GoogleTest |
-
-| FileManager | 文件创建、滚动、删除 | GoogleTest + Mock filesystem |
-| CrashHandler | 信号处理、quick_flush | GoogleTest + 信号注入 |
-
-### 8.2 集成测试
-
-| 测试场景 | 测试目标 | 工具 |
-|---------|---------|------|
-| 异步日志写入 | 验证后台线程正确写入 | 多线程测试程序 |
-| 文件滚动 | 验证滚动逻辑和原子性 | 填充日志文件 |
-| 多进程隔离 | 验证进程间日志不干扰 | 启动多个进程 |
-| 日志归档 | 验证ZIP打包和文件删除 | 归档接口调用 |
-| 崩溃恢复 | 验证崩溃时数据保存 | 触发崩溃信号 |
-
-### 8.3 性能测试
-
-| 测试指标 | 测试方法 | 目标值 |
-|---------|---------|--------|
-| 调用延迟 | 测量 `log()` 函数耗时 | < 1ms |
-| 吞吐量 | 持续写入日志，测量条/秒 | > 100K 条/秒 |
-| 并发性能 | 多线程并发写入，测量性能下降 | < 20% 下降 |
-| 内存占用 | 长时间运行，监控内存 | < 200MB |
-| 文件滚动 | 测量滚动操作耗时 | < 100ms |
-| 归档性能 | 归档 10MB 日志 | < 5s |
-
-### 8.4 压力测试
-
-| 测试场景 | 测试方法 | 预期结果 |
-|---------|---------|---------|
-| 高频写入 | 100K+ 条/秒持续写入 | 不丢失、不重复 |
-| 长时间运行 | 24小时连续运行 | 无内存泄漏、性能稳定 |
-| 极端并发 | 50+ 线程同时写入 | 系统稳定 |
-| 磁盘满 | 模拟磁盘空间耗尽 | 优雅降级，不崩溃 |
-| 快速崩溃 | 循环触发崩溃信号 | 90%+ 数据保存 |
-
----
-
-## 9. 部署与运维
-
-### 9.1 编译构建
-
-#### Windows
-
-```bash
-# 安装依赖
+        <h2 id="9-部署与运维">9. 部署与运维</h2>
+        <h3 id="91-编译构建">9.1 编译构建</h3>
+        <h4 id="windows">Windows</h4>
+        <pre><code># 安装依赖
 # Visual Studio 2022 with C++20 support
 
 # 构建
 cd AppSimpleLog
 mkdir build && cd build
 cmake .. -G "Visual Studio 17 2022" -A x64
-cmake --build . --config Release
-```
+cmake --build . --config Release</code></pre>
 
-#### macOS
-
-```bash
-# 安装依赖
+        <h4 id="macos">macOS</h4>
+        <pre><code># 安装依赖
 # Xcode Command Line Tools (includes C++20 support)
 
 # 构建
 cd AppSimpleLog
 mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
-make -j8
-```
+make -j8</code></pre>
 
-### 9.2 集成方式
-
-#### C++ 项目
-
-```cpp
-#include "speckit/log/speckit_logger.h"
+        <h3 id="92-集成方式">9.2 集成方式</h3>
+        <h4 id="c-项目">C++ 项目</h4>
+        <pre><code>#include "speckit/log/speckit_logger.h"
 
 SpeckitLoggerConfig config = {
     .log_directory = "./logs",
@@ -907,13 +1022,10 @@ SpeckitLoggerConfig config = {
 auto* logger = speckit_logger_create(&config);
 speckit_logger_log(logger, SPECKIT_LOG_LEVEL_INFO, "Network", 
                    "Connection established");
-speckit_logger_destroy(logger);
-```
+speckit_logger_destroy(logger);</code></pre>
 
-#### Objective-C 项目
-
-```objective-c
-#import "speckit_log.h"
+        <h4 id="objective-c-项目">Objective-C 项目</h4>
+        <pre><code>#import "speckit_log.h"
 
 SpeckitLoggerConfig config;
 config.log_directory = [logsPath UTF8String];
@@ -923,70 +1035,70 @@ config.default_level = SPECKIT_LOG_LEVEL_INFO;
 SpeckitLogger* logger = speckit_logger_create(&config);
 speckit_logger_log(logger, SPECKIT_LOG_LEVEL_INFO, "UI", 
                    "Button clicked");
-speckit_logger_destroy(logger);
-```
+speckit_logger_destroy(logger);</code></pre>
 
-### 9.3 日志目录结构
-
-```
-logs/
+        <h3 id="93-日志目录结构">9.3 日志目录结构</h3>
+        <pre><code>logs/
 ├── app.log                    # 主进程日志
 ├── app_1234.log               # 进程 1234 的日志
 ├── app.1.log                  # 历史文件 1
 ├── app.2.log                  # 历史文件 2
 ├── app.3.log                  # 历史文件 3
-└── app_1234_20230116120000.zip # 归档文件
-```
+└── app_1234_20230116120000.zip # 归档文件</code></pre>
 
-### 9.4 监控与诊断
+        <h3 id="94-监控与诊断">9.4 监控与诊断</h3>
+        <table>
+            <thead>
+                <tr><th>监控指标</th><th>收集方式</th><th>告警阈值</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>日志丢弃率</td><td><code>speckit_logger_get_stats()</code></td><td>&gt; 1%</td></tr>
+                <tr><td>缓冲区使用率</td><td>stats.buffer_size / stats.buffer_capacity</td><td>&gt; 80%</td></tr>
+                <tr><td>磁盘空间</td><td>文件系统检查</td><td>&lt; 1GB</td></tr>
+                <tr><td>文件滚动频率</td><td>监控文件创建</td><td>&gt; 10次/小时</td></tr>
+            </tbody>
+        </table>
 
-| 监控指标 | 收集方式 | 告警阈值 |
-|---------|---------|---------|
-| 日志丢弃率 | `speckit_logger_get_stats()` | > 1% |
-| 缓冲区使用率 | `stats.buffer_size / stats.buffer_capacity` | > 80% |
-| 磁盘空间 | 文件系统检查 | < 1GB |
-| 文件滚动频率 | 监控文件创建 | > 10次/小时 |
+        <h2 id="10-风险评估与缓解">10. 风险评估与缓解</h2>
+        <h3 id="101-技术风险">10.1 技术风险</h3>
+        <table>
+            <thead>
+                <tr><th>风险</th><th>影响</th><th>概率</th><th>缓解措施</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>C++20 std::format 不支持</td><td>高</td><td>低</td><td>使用第三方库（如 fmt）作为备选</td></tr>
+                <tr><td>跨平台文件系统差异</td><td>中</td><td>中</td><td>充分测试，使用 std::filesystem 抽象</td></tr>
+                <tr><td>零依赖实现复杂度</td><td>高</td><td>中</td><td>详细设计，模块化开发</td></tr>
+                <tr><td>崩溃恢复效果</td><td>高</td><td>中</td><td>充分测试多种崩溃场景</td></tr>
+                <tr><td>性能不达标</td><td>中</td><td>低</td><td>性能测试驱动开发</td></tr>
+            </tbody>
+        </table>
 
----
+        <h3 id="102-运维风险">10.2 运维风险</h3>
+        <table>
+            <thead>
+                <tr><th>风险</th><th>影响</th><th>概率</th><th>缓解措施</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>日志文件占用磁盘过大</td><td>中</td><td>中</td><td>实现自动滚动和归档</td></tr>
+                <tr><td>多进程日志冲突</td><td>高</td><td>低</td><td>进程ID隔离设计</td></tr>
+                <tr><td>日志丢失</td><td>高</td><td>低</td><td>崩溃安全机制 + 定期flush</td></tr>
+                <tr><td>文件权限问题</td><td>中</td><td>低</td><td>提供权限检查和错误提示</td></tr>
+            </tbody>
+        </table>
 
-## 10. 风险评估与缓解
+        <h3 id="103-不确定事项">10.3 不确定事项</h3>
+        <p>以下事项需要进一步确认：</p>
+        <ol>
+            <li><strong>归档方案</strong>: 由于零依赖限制，需要确认目标平台是否提供原生 ZIP API，否则需要实现简单压缩算法</li>
+            <li><strong>时间戳格式</strong>: 需要确认是否使用本地时区还是 UTC，以及跨时区部署的处理方式</li>
+            <li><strong>崩溃恢复窗口</strong>: 定期flush的间隔（当前设计为100-500ms）</li>
+            <li><strong>缓冲区容量</strong>: 默认缓冲区大小需要根据日志量级调整（建议10000条）</li>
+        </ol>
 
-### 10.1 技术风险
-
-| 风险 | 影响 | 概率 | 缓解措施 |
-|------|------|------|---------|
-| C++20 std::format 不支持 | 高 | 低 | 使用第三方库（如 fmt）作为备选 |
-| 跨平台文件系统差异 | 中 | 中 | 充分测试，使用 std::filesystem 抽象 |
-| 零依赖实现复杂度 | 高 | 中 | 详细设计，模块化开发 |
-| 崩溃恢复效果 | 高 | 中 | 充分测试多种崩溃场景 |
-| 性能不达标 | 中 | 低 | 性能测试驱动开发 |
-
-### 10.2 运维风险
-
-| 风险 | 影响 | 概率 | 缓解措施 |
-|------|------|------|---------|
-| 日志文件占用磁盘过大 | 中 | 中 | 实现自动滚动和归档 |
-| 多进程日志冲突 | 高 | 低 | 进程ID隔离设计 |
-| 日志丢失 | 高 | 低 | 崩溃安全机制 + 定期flush |
-| 文件权限问题 | 中 | 低 | 提供权限检查和错误提示 |
-
-### 10.3 不确定事项
-
-以下事项需要进一步确认：
-
-1. **归档方案**: 由于零依赖限制，需要确认目标平台是否提供原生 ZIP API，否则需要实现简单压缩算法
-2. **时间戳格式**: 需要确认是否使用本地时区还是 UTC，以及跨时区部署的处理方式
-3. **崩溃恢复窗口**: 定期flush的间隔（当前设计为100-500ms）
-4. **缓冲区容量**: 默认缓冲区大小需要根据日志量级调整（建议10000条）
-
----
-
-## 11. 接口图
-
-### 11.1 模块依赖关系图
-
-```
-┌──────────────────────────────────────────────────────────────┐
+        <h2 id="11-接口图">11. 接口图</h2>
+        <h3 id="111-模块依赖关系图">11.1 模块依赖关系图</h3>
+        <div class="diagram"><pre>┌──────────────────────────────────────────────────────────────┐
 │                        Application                            │
 │                   (C++ / Objective-C)                         │
 └──────────────────────────────────────────────────────────────┘
@@ -1015,7 +1127,7 @@ logs/
 │      ┌──────────┼──────────┬──────────┐                      │
 │      ▼          ▼          ▼          ▼                      │
 │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐            │
-│  │LogEntry │ │ │LogBuffer│ │FileManager│           │
+│  │LogEntry │ │LogBuffer│ │FileManager│CrashHandler│        │
 │  └─────────┘ └─────────┘ └─────────┘ └─────────┘            │
 │                                                              │
 │  ┌──────────────────────────────────────────────────────┐    │
@@ -1023,7 +1135,6 @@ logs/
 │  │  - create_logger()                                   │    │
 │  │  - destroy_logger()                                 │    │
 │  └──────────────────────────────────────────────────────┘    │
-│                                                              │
 │  ┌──────────────────────────────────────────────────────┐    │
 │  │                   CrashHandler                       │    │
 │  │  - signal_handler()                                   │    │
@@ -1048,13 +1159,10 @@ logs/
 │  │ Text Log     │  │ Rotated      │  │ ZIP Archive  │       │
 │  │ Files        │  │ Files        │  │              │       │
 │  └──────────────┘  └──────────────┘  └──────────────┘       │
-└──────────────────────────────────────────────────────────────┘
-```
+└──────────────────────────────────────────────────────────────┘</pre></div>
 
-### 11.2 日志写入流程图
-
-```
-┌────────────────┐
+        <h3 id="112-日志写入流程图">11.2 日志写入流程图</h3>
+        <div class="diagram"><pre>┌────────────────┐
 │ App calls      │
 │ log() function │
 └────────┬───────┘
@@ -1139,13 +1247,10 @@ logs/
                              ┌──────────────────┐
                              │ Periodic Flush   │
                              │ (e.g., every 1s) │
-                             └──────────────────┘
-```
+                             └──────────────────┘</pre></div>
 
-### 11.3 文件滚动流程图
-
-```
-┌──────────────────────────────────┐
+        <h3 id="113-文件滚动流程图">11.3 文件滚动流程图</h3>
+        <div class="diagram"><pre>┌──────────────────────────────────┐
 │ Writing to current file         │
 │ (A.log)                         │
 └────────┬─────────────────────────┘
@@ -1179,13 +1284,10 @@ logs/
                   ▼
          ┌──────────────────────────────────┐
          │ Continue writing                 │
-         └──────────────────────────────────┘
-```
+         └──────────────────────────────────┘</pre></div>
 
-### 11.4 崩溃恢复流程图
-
-```
-┌──────────────────────────────────┐
+        <h3 id="114-崩溃恢复流程图">11.4 崩溃恢复流程图</h3>
+        <div class="diagram"><pre>┌──────────────────────────────────┐
 │ Application Crash               │
 │ (SIGSEGV / SIGABRT / etc.)      │
 └────────┬─────────────────────────┘
@@ -1243,13 +1345,10 @@ logs/
          ▼
 ┌──────────────────────────────────┐
 │ Process terminates               │
-└──────────────────────────────────┘
-```
+└──────────────────────────────────┘</pre></div>
 
-### 11.5 归档流程图
-
-```
-┌──────────────────────────────────┐
+        <h3 id="115-归档流程图">11.5 归档流程图</h3>
+        <div class="diagram"><pre>┌──────────────────────────────────┐
 │ User calls                       │
 │ speckit_logger_archive()         │
 └────────┬─────────────────────────┘
@@ -1296,13 +1395,10 @@ logs/
          ▼
 ┌──────────────────────────────────┐
 │ Return success                    │
-└──────────────────────────────────┘
-```
+└──────────────────────────────────┘</pre></div>
 
-### 11.6 状态转换图
-
-```
-                    ┌───────────┐
+        <h3 id="116-状态转换图">11.6 状态转换图</h3>
+        <div class="diagram"><pre>                    ┌───────────┐
                     │  CREATED  │
                     └─────┬─────┘
                           │ speckit_logger_create()
@@ -1335,42 +1431,49 @@ logs/
                                            ▼
                                     ┌─────────────┐
                                     │   DESTROYED │
-                                    └─────────────┘
-```
+                                    └─────────────┘</pre></div>
 
----
+        <h2 id="12-附录">12. 附录</h2>
+        <h3 id="121-术语表">12.1 术语表</h3>
+        <table>
+            <thead>
+                <tr><th>术语</th><th>定义</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>C-Bridge</td><td>C语言桥接层，用于跨语言调用</td></tr>
+                <tr><td>Lock-Free Queue</td><td>无锁队列，基于原子操作实现</td></tr>
+                <tr><td>Ring Buffer</td><td>环形缓冲区，固定容量循环使用</td></tr>
+                <tr><td>Log Rotation</td><td>日志滚动，文件达到大小限制时创建新文件</td></tr>
+                <tr><td>Tag Filter</td><td>标签过滤器，按标签控制日志输出</td></tr>
+                <tr><td>Crash-Safe</td><td>崩溃安全，程序崩溃时数据不丢失</td></tr>
+                <tr><td>Signal Handler</td><td>信号处理程序，捕获系统信号</td></tr>
+            </tbody>
+        </table>
 
-## 12. 附录
+        <h3 id="122-参考资料">12.2 参考资料</h3>
+        <ul>
+            <li>C++20 Standard Library Documentation</li>
+            <li>GoogleTest User Guide</li>
+            <li>CMake Documentation</li>
+            <li>POSIX Signal Handling</li>
+            <li>Windows Exception Handling</li>
+        </ul>
 
-### 12.1 术语表
+        <h3 id="123-变更记录">12.3 变更记录</h3>
+        <table>
+            <thead>
+                <tr><th>版本</th><th>日期</th><th>作者</th><th>变更内容</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>v1.3</td><td>2026-01-16</td><td>AI</td><td>调整flush间隔至100-500ms，简化文件句柄管理（单进程单文件），实际场景数据保存率 &gt; 99%</td></tr>
+                <tr><td>v1.2</td><td>2026-01-16</td><td>AI</td><td>增强崩溃安全机制：双缓冲 + 高频flush</td></tr>
+                <tr><td>v1.1</td><td>2026-01-16</td><td>AI</td><td>移除标签过滤功能，仅保留标签透传</td></tr>
+                <tr><td>v1.0</td><td>2026-01-16</td><td>AI</td><td>初始版本</td></tr>
+            </tbody>
+        </table>
 
-| 术语 | 定义 |
-|------|------|
-| C-Bridge | C语言桥接层，用于跨语言调用 |
-| Lock-Free Queue | 无锁队列，基于原子操作实现 |
-| Ring Buffer | 环形缓冲区，固定容量循环使用 |
-| Log Rotation | 日志滚动，文件达到大小限制时创建新文件 |
-| Tag Filter | 标签过滤器，按标签控制日志输出 |
-| Crash-Safe | 崩溃安全，程序崩溃时数据不丢失 |
-| Signal Handler | 信号处理程序，捕获系统信号 |
-
-### 12.2 参考资料
-
-- C++20 Standard Library Documentation
-- GoogleTest User Guide
-- CMake Documentation
-- POSIX Signal Handling
-- Windows Exception Handling
-
-### 12.3 变更记录
-
-| 版本 | 日期 | 作者 | 变更内容 |
-|------|------|------|---------|
-| v1.3 | 2026-01-16 | AI | 调整flush间隔至100-500ms，简化文件句柄管理（单进程单文件），实际场景数据保存率 > 99% |
-| v1.2 | 2026-01-16 | AI | 增强崩溃安全机制：双缓冲 + 高频flush |
-| v1.1 | 2026-01-16 | AI | 移除标签过滤功能，仅保留标签透传 |
-| v1.0 | 2026-01-16 | AI | 初始版本 |
-
----
-
-**文档结束**
+        <hr>
+        <p style="text-align: center; color: #7f8c8d;"><strong>文档结束</strong></p>
+    </div>
+</body>
+</html>
