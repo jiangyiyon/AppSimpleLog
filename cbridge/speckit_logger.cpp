@@ -1,156 +1,134 @@
-/*
-Implementation notes (inline):
-- tryPush(LogEntry&):
-    1) Check for full: if tail_ - head_ >= capacity_ => full.
-    2) Reserve ticket by CAS on tail_ (compare_exchange_weak).
-    3) Compute slot index = ticket % capacity_.
-    4) Spin until cell.seq == ticket (slot free for this ticket).
-    5) emplace/move entry into storage.
-    6) Publish by setting cell.seq = ticket + 1 (release store).
-    7) Update size_ and return true.
-- tryPush(LogEntry&&) forwards to the lvalue overload so callers can pass temporaries.
-- popAll:
-    - Computes available = tail_ - head_, loops through each slot,
-      waits for seq == head + i + 1 (acquire), moves out storage, resets optional,
-      then sets seq = head + i + capacity_ (release) to mark slot reusable.
-- Memory ordering:
-    - Producer publishes with release, consumer observes with acquire to form happens-before.
-*/
+#include "speckit_logger.h"
+#include "speckit/log/file_manager.h"
+#include "speckit/log/tag_filter.h"
+#include "speckit/log/archive.h"
 
-#include "speckit/log/async_queue.h"
-#include <cassert>
+#include <memory>
+#include <string>
+#include <chrono>
+#include <sstream>
 #include <thread>
 
-AsyncQueue::AsyncQueue(size_t capacity)
-    : buffer_(nullptr), capacity_(capacity), tail_(0), head_(0), size_(0) {
-    assert(capacity_ > 0);
-    buffer_ = std::make_unique<Cell[]>(capacity_);
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
-    // Initialize per-slot sequence numbers to their index.
-    // seq == index means slot is free for ticket == index.
-    for (size_t i = 0; i < capacity_; ++i) {
-        buffer_[i].seq.store(i, std::memory_order_relaxed);
-    }
+struct SpeckitLoggerImpl {
+    std::unique_ptr<FileManager> fm;
+    std::unique_ptr<speckit::log::TagFilter> tagFilter;
+    speckit::log::LogLevel level = speckit::log::LogLevel::kLogLevelDebug;
+    std::string baseName;
+    int processId = 0;
+};
+
+extern "C" {
+
+SpeckitLogger* speckit_logger_create(const char* config) {
+    if (!config) return nullptr;
+    auto impl = new SpeckitLoggerImpl();
+    impl->baseName = std::string(config);
+
+#ifdef _WIN32
+    impl->processId = static_cast<int>(GetCurrentProcessId());
+#else
+    impl->processId = static_cast<int>(getpid());
+#endif
+
+    impl->fm = std::make_unique<FileManager>(impl->baseName);
+    impl->fm->initialize(impl->processId);
+    impl->tagFilter = std::make_unique<speckit::log::TagFilter>();
+
+    return reinterpret_cast<SpeckitLogger*>(impl);
 }
 
-AsyncQueue::~AsyncQueue() {
-    // Defensive cleanup: destroy any remaining storage (consumer should normally drain).
-    size_t head = head_.load(std::memory_order_relaxed);
-    size_t tail = tail_.load(std::memory_order_relaxed);
-    size_t available = (tail >= head) ? (tail - head) : 0;
+SpeckitErrorCode speckit_logger_log(SpeckitLogger* logger, int level,
+                                     const char* tag, const char* message) {
+    if (!logger || !message) return SPECKIT_ERROR_NULL_POINTER;
+    auto impl = reinterpret_cast<SpeckitLoggerImpl*>(logger);
 
-    for (size_t i = 0; i < available; ++i) {
-        size_t pos = (head + i) % capacity_;
-        if (buffer_[pos].storage.has_value()) {
-            buffer_[pos].storage.reset();
-        }
-    }
-}
+    // Tag filtering
+    std::string tagStr = tag ? tag : "";
+    if (!impl->tagFilter->isTagEnabled(tagStr)) return SPECKIT_SUCCESS;
 
-bool AsyncQueue::tryPush(LogEntry& entry) {
-    const size_t cap = capacity_;
+    // Level filtering per tag
+    speckit::log::LogLevel tagLevel = impl->tagFilter->getTagLevel(tagStr);
+    speckit::log::LogLevel msgLevel = static_cast<speckit::log::LogLevel>(level);
+    if (static_cast<int>(msgLevel) < static_cast<int>(tagLevel)) return SPECKIT_SUCCESS;
 
-    while (true) {
-        // Fast path check (optimistic)
-        size_t current_tail = tail_.load(std::memory_order_relaxed);
-        size_t current_head = head_.load(std::memory_order_acquire);
+    // Basic formatting: [LEVEL] message\n
+    std::string out = message;
+    out.push_back('\n');
 
-        // If the number of reserved tickets (tail - head) is >= capacity, queue is full.
-        if (current_tail - current_head >= cap) {
-            return false; // full
-        }
+    bool ok = impl->fm->write(out);
+    if (!ok) return SPECKIT_ERROR_FILE_IO;
 
-        // Reserve a ticket using CAS. Using compare_exchange_weak in a loop is typical.
-        if (tail_.compare_exchange_weak(current_tail, current_tail + 1,
-            std::memory_order_acq_rel,
-            std::memory_order_relaxed)) {
-            // We own ticket == current_tail
-            size_t pos = current_tail % cap;
-            Cell& cell = buffer_[pos];
-
-            // Wait until the slot's sequence equals our ticket, indicating it is free.
-            // This avoids overwriting data that hasn't been consumed yet.
-            while (cell.seq.load(std::memory_order_acquire) != current_tail) {
-                // polite spin; tune for your workload (busy-spin/pause/backoff)
-                std::this_thread::yield();
-            }
-
-            // Construct/move the log entry into the cell's storage.
-            cell.storage.emplace(std::move(entry));
-
-            // Publish the slot as ready to read. Release ensures prior writes (storage)
-            // are visible to a consumer that performs an acquire load on seq.
-            cell.seq.store(current_tail + 1, std::memory_order_release);
-
-            // Update size for external queries (optional optimization: derive from tail-head).
-            size_.fetch_add(1, std::memory_order_acq_rel);
-
-            return true;
-        }
-
-        // CAS failed: another producer reserved that ticket. Retry.
-    }
-}
-
-bool AsyncQueue::tryPush(LogEntry&& entry) {
-    // Forward rvalue to lvalue overload ¡ª treat local parameter as an lvalue to move from.
-    return tryPush(static_cast<LogEntry&>(entry));
-}
-
-std::vector<LogEntry> AsyncQueue::popAll() {
-    std::vector<LogEntry> result;
-    const size_t cap = capacity_;
-
-    // Sample head and tail to determine how many entries are available.
-    size_t head = head_.load(std::memory_order_relaxed);
-    size_t tail = tail_.load(std::memory_order_acquire);
-
-    size_t available = (tail >= head) ? (tail - head) : 0;
-    if (available == 0) {
-        return result;
+    if (impl->fm->needsRotation()) {
+        impl->fm->rotate();
     }
 
-    result.reserve(available);
-
-    // For each available ticket, wait until the slot is published (seq == ticket+1),
-    // then move the entry out and mark the slot reusable.
-    for (size_t i = 0; i < available; ++i) {
-        size_t idx = (head + i) % cap;
-        Cell& cell = buffer_[idx];
-
-        // Wait until producer has published this ticket. The acquire load synchronizes
-        // with the producer's release store on seq, ensuring the storage contents are visible.
-        size_t expected = head + i + 1;
-        while (cell.seq.load(std::memory_order_acquire) != expected) {
-            std::this_thread::yield();
-        }
-
-        // Move the entry out if present. Optional guards against unexpected states.
-        if (cell.storage.has_value()) {
-            result.push_back(std::move(*cell.storage));
-            cell.storage.reset();
-        }
-
-        // Mark the slot free for future producers by advancing seq to a value that
-        // represents the next cycle where this slot becomes available.
-        cell.seq.store(head + i + cap, std::memory_order_release);
-    }
-
-    // Advance head and adjust size atomically.
-    head_.store(head + available, std::memory_order_release);
-    size_.fetch_sub(available, std::memory_order_acq_rel);
-
-    return result;
+    return SPECKIT_SUCCESS;
 }
 
-bool AsyncQueue::isEmpty() const {
-    return size_.load(std::memory_order_acquire) == 0;
+SpeckitErrorCode speckit_logger_set_log_level(SpeckitLogger* logger, int level) {
+    if (!logger) return SPECKIT_ERROR_NULL_POINTER;
+    auto impl = reinterpret_cast<SpeckitLoggerImpl*>(logger);
+    impl->level = static_cast<speckit::log::LogLevel>(level);
+    return SPECKIT_SUCCESS;
 }
 
-size_t AsyncQueue::size() const {
-    return size_.load(std::memory_order_acquire);
+SpeckitErrorCode speckit_logger_destroy(SpeckitLogger* logger) {
+    if (!logger) return SPECKIT_ERROR_NULL_POINTER;
+    auto impl = reinterpret_cast<SpeckitLoggerImpl*>(logger);
+    // flush and cleanup handled in FileManager destructor
+    delete impl;
+    return SPECKIT_SUCCESS;
 }
 
-size_t AsyncQueue::capacity() const {
-    return capacity_;
+// P2/P3 helpers
+void speckit_logger_set_max_file_size(unsigned long long bytes) {
+    // global setter for default file manager (not instance-specific)
+    (void)bytes; // stub - instance-level API preferred
 }
+
+void speckit_logger_set_retention_count(int count) {
+    (void)count; // stub
+}
+
+void speckit_logger_set_tag_enabled(const char* tag, int enabled) {
+    (void)tag; (void)enabled; // stubs: per-instance API exists via speckit_logger_create
+}
+
+void speckit_logger_set_tag_level(const char* tag, int level) {
+    (void)tag; (void)level;
+}
+
+int speckit_logger_archive(const char* baseName) {
+    if (!baseName) return -1;
+#ifdef _WIN32
+    int pid = static_cast<int>(GetCurrentProcessId());
+#else
+    int pid = static_cast<int>(getpid());
+#endif
+    // timestamp simple
+    auto now = std::chrono::system_clock::now();
+    auto t = std::chrono::system_clock::to_time_t(now);
+    std::tm tm{};
+#ifdef _WIN32
+    localtime_s(&tm, &t);
+#else
+    localtime_r(&t, &tm);
+#endif
+    char buf[32];
+    std::strftime(buf, sizeof(buf), "%Y%m%d%H%M%S", &tm);
+
+    bool ok = speckit::log::createArchive(baseName, pid, buf);
+    return ok ? 0 : -1;
+}
+
+void speckit_logger_set_auto_archive_config(int enabled) {
+    (void)enabled; // stub
+}
+
+} // extern "C"

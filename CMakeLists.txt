@@ -27,6 +27,8 @@ set(LOG_LIB_SOURCES
     src/src/async_logger.cpp
     src/src/async_queue.cpp
     src/src/crash_handler.cpp
+    src/src/archive.cpp
+    src/src/tag_filter.cpp
 )
 
 # C bridge source files
