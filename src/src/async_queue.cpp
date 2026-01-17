@@ -1,103 +1,123 @@
-// Async queue implementation with atomic operations
-
 #include "speckit/log/async_queue.h"
-#include <algorithm>
+#include <cassert>
+#include <thread>
 
 AsyncQueue::AsyncQueue(size_t capacity)
-    : write_index_(0), read_index_(0), size_(0), capacity_(capacity) {
-    // Pre-allocate buffer to avoid runtime allocation
-    buffer_ = std::make_unique<LogEntry[]>(capacity);
+    : buffer_(nullptr), capacity_(capacity), tail_(0), head_(0), size_(0) {
+    assert(capacity_ > 0);
+    buffer_ = std::make_unique<Cell[]>(capacity_);
+
+    // Initialize per-slot sequence numbers to their index
+    for (size_t i = 0; i < capacity_; ++i) {
+        buffer_[i].seq.store(i, std::memory_order_relaxed);
+    }
 }
 
-AsyncQueue::~AsyncQueue() = default;
+AsyncQueue::~AsyncQueue() {
+    // Defensive cleanup: destroy any remaining storage
+    size_t head = head_.load(std::memory_order_relaxed);
+    size_t tail = tail_.load(std::memory_order_relaxed);
+    size_t available = (tail >= head) ? (tail - head) : 0;
 
-bool AsyncQueue::tryPush(const LogEntry& entry) {
-    size_t current_read, current_write;
+    for (size_t i = 0; i < available; ++i) {
+        size_t pos = (head + i) % capacity_;
+        if (buffer_[pos].storage.has_value()) {
+            buffer_[pos].storage.reset();
+        }
+    }
+}
 
-    do {
-        current_read = read_index_.load(std::memory_order_acquire);
-        current_write = write_index_.load(std::memory_order_acquire);
+bool AsyncQueue::tryPush(LogEntry& entry) {
+    const size_t cap = capacity_;
 
-        // Calculate size based on current read/write positions
-        size_t current_size = (current_write - current_read + capacity_) % capacity_;
+    while (true) {
+        size_t current_tail = tail_.load(std::memory_order_relaxed);
+        size_t current_head = head_.load(std::memory_order_acquire);
 
-        if (current_size >= capacity_ - 1) { // Queue is full
-            return false;
+        // Detect full: reserved but not yet consumed count >= cap
+        if (current_tail - current_head >= cap) {
+            return false; // queue full
         }
 
-        // Calculate new write index
-        size_t new_write = (current_write + 1) % capacity_;
+        // Try to reserve a ticket (slot index = current_tail)
+        if (tail_.compare_exchange_weak(current_tail, current_tail + 1,
+            std::memory_order_acq_rel,
+            std::memory_order_relaxed)) {
+            size_t pos = current_tail % cap;
+            Cell& cell = buffer_[pos];
 
-        // Attempt to atomically update write index
-        if (write_index_.compare_exchange_strong(current_write, new_write,
-            std::memory_order_acq_rel, std::memory_order_acquire)) {
-            
-            // Successfully acquired write position, store the entry
-            // Use move assignment since LogEntry copy is deleted
-            buffer_[current_write] = std::move(const_cast<LogEntry&>(entry));
-            
-            // Ensure the write is visible before updating size
-            std::atomic_thread_fence(std::memory_order_release);
-            
-            // Update size atomically
-            size_.fetch_add(1, std::memory_order_relaxed);
-            
+            // Wait until cell.seq == current_tail (slot free for this ticket)
+            while (cell.seq.load(std::memory_order_acquire) != current_tail) {
+                // polite spin
+                std::this_thread::yield();
+            }
+
+            // Construct entry in-place by moving from caller's entry
+            cell.storage.emplace(std::move(entry));
+
+            // Publish slot as ready: seq = current_tail + 1
+            cell.seq.store(current_tail + 1, std::memory_order_release);
+
+            // Update size counter
+            size_.fetch_add(1, std::memory_order_acq_rel);
+
             return true;
         }
-        
-        // If CAS failed, retry with updated values
-    } while (true);
+        // CAS failed; retry (another producer won the ticket)
+    }
+}
+
+bool AsyncQueue::tryPush(LogEntry&& entry) {
+    // Forward to lvalue overload (treat entry as lvalue here)
+    return tryPush(static_cast<LogEntry&>(entry));
 }
 
 std::vector<LogEntry> AsyncQueue::popAll() {
     std::vector<LogEntry> result;
-    
-    while (true) {
-        // Get current read and write indices
-        size_t current_read = read_index_.load(std::memory_order_acquire);
-        size_t current_write = write_index_.load(std::memory_order_acquire);
-        
-        // Calculate number of available entries
-        size_t available_count = (current_write - current_read + capacity_) % capacity_;
-        
-        if (available_count == 0) {
-            return result; // No entries to pop
-        }
-        
-        // Prepare result vector
-        result.clear();
-        result.reserve(available_count);
-        
-        // Copy all available entries
-        for (size_t i = 0; i < available_count; ++i) {
-            size_t index = (current_read + i) % capacity_;
-            // Use move semantics to avoid copying
-            result.push_back(std::move(buffer_[index]));
-        }
-        
-        // Attempt to atomically update read index
-        if (read_index_.compare_exchange_strong(current_read, current_write,
-            std::memory_order_acq_rel, std::memory_order_acquire)) {
-            
-            // Update size atomically
-            size_.fetch_sub(available_count, std::memory_order_relaxed);
-            
-            // Success - return the entries
-            return result;
-        }
-        
-        // If CAS failed, another thread popped entries first, try again
+    const size_t cap = capacity_;
+
+    size_t head = head_.load(std::memory_order_relaxed);
+    size_t tail = tail_.load(std::memory_order_acquire);
+
+    size_t available = (tail >= head) ? (tail - head) : 0;
+    if (available == 0) {
+        return result;
     }
+
+    result.reserve(available);
+
+    for (size_t i = 0; i < available; ++i) {
+        size_t idx = (head + i) % cap;
+        Cell& cell = buffer_[idx];
+
+        // Wait until producer published slot: seq == head + i + 1
+        size_t expected = head + i + 1;
+        while (cell.seq.load(std::memory_order_acquire) != expected) {
+            std::this_thread::yield();
+        }
+
+        // Move entry out if present
+        if (cell.storage.has_value()) {
+            result.push_back(std::move(*cell.storage));
+            cell.storage.reset();
+        }
+
+        // Mark slot free for future producers: set seq = head + i + cap
+        cell.seq.store(head + i + cap, std::memory_order_release);
+    }
+
+    // Advance head and update size
+    head_.store(head + available, std::memory_order_release);
+    size_.fetch_sub(available, std::memory_order_acq_rel);
+
+    return result;
 }
 
 bool AsyncQueue::isEmpty() const {
-    size_t current_read = read_index_.load(std::memory_order_acquire);
-    size_t current_write = write_index_.load(std::memory_order_acquire);
-    return current_read == current_write;
+    return size_.load(std::memory_order_acquire) == 0;
 }
 
 size_t AsyncQueue::size() const {
-    // Use the atomic size_ for consistency with tryPush and popAll
     return size_.load(std::memory_order_acquire);
 }
 
