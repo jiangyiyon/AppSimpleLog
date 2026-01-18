@@ -7,6 +7,7 @@
 #include <memory>
 #include <atomic>
 #include <thread>
+#include <stop_token>
 #include <semaphore>
 #include "log_level.h"
 #include "log_entry.h"
@@ -22,15 +23,20 @@
 /// Provides <1ms log call latency with non-blocking operations
 class AsyncLogger {
 public:
-    /// Create async logger instance
+    /// Create async logger instance. Returns nullptr on failure.
     /// @param base_name Base name for log files (supports absolute/relative paths, UTF-8 encoding)
     /// @param queue_size Size of async queue (default: 10000)
-    /// @return Unique pointer to async logger instance
     static std::unique_ptr<AsyncLogger> create(const std::string& base_name,
-                                                   size_t queue_size = 10000);
+                                               size_t queue_size = 10000);
     
     /// Destructor - ensures proper cleanup
     ~AsyncLogger();
+
+    /// Initialize logger components. Returns true on success.
+    bool initialize(const std::string& base_name, size_t queue_size);
+
+    /// Deinitialize and stop background thread. Safe to call multiple times.
+    void deinitialize();
     
     /// Set minimum log level
     /// @param level Minimum log level to output
@@ -50,10 +56,17 @@ public:
     void flush();
 
 private:
-    AsyncLogger(const std::string& base_name, size_t queue_size);
+    AsyncLogger();
     
-    /// Background writer thread function
-    void writerThread();
+    /// Background writer thread function. The std::stop_token is provided by std::jthread.
+    void writerThread(std::stop_token stop_token);
+
+    /// Helper to format and write a collection of log entries.
+    void writeEntries(const std::vector<LogEntry>& entries);
+
+    /// Initialize components (extracted from constructor to support testing)
+    /// Returns true on success.
+    bool initializeComponents(const std::string& base_name, size_t queue_size);
     
     /// Emergency flush callback for crash handler
     void emergencyFlush();
@@ -73,8 +86,6 @@ private:
     std::unique_ptr<CrashHandler> crash_handler_; ///< Crash handler
     std::jthread writer_thread_;                   ///< Background writer thread
     std::counting_semaphore<1> sem_;               ///< Semaphore for thread synchronization (C++20)
-    std::atomic<bool> running_;                  ///< Thread running flag
-    std::atomic<bool> shutdown_requested_;         ///< Shutdown request flag
     LogLevel min_level_ = LogLevel::kLogLevelDebug;       ///< Minimum log level
     ProcessIdType process_id_;                 ///< Cached process ID
     bool initialized_ = false;                   ///< Initialization state

@@ -7,81 +7,122 @@
 
 
 
+namespace {
+
+// Signals we handle. Kept in an array for iteration.
+constexpr int kHandledSignals[] = {
+#ifdef SPECKIT_PLATFORM_WINDOWS
+    SIGSEGV,
+    SIGABRT,
+#else
+    SIGSEGV,
+    SIGABRT,
+#endif
+};
+
+}  // namespace
+
 // Static members
 CrashHandler::FlushCallback CrashHandler::flush_callback_ = nullptr;
-std::atomic<bool> CrashHandler::initialized_(false);
+std::atomic<bool> CrashHandler::initialized_{false};
+std::atomic<bool> CrashHandler::flush_requested_{false};
 
-CrashHandler::CrashHandler() {
-    initializeHandlers();
+CrashHandler::CrashHandler() { initializeHandlers(); }
+
+CrashHandler::~CrashHandler() { cleanupHandlers(); }
+
+void CrashHandler::startMonitor() {
+    stop_monitor_.store(false);
+    monitor_thread_ = std::thread([this]() {
+        while (!stop_monitor_.load()) {
+            if (flush_requested_.exchange(false)) {
+                // Perform emergency flush outside of signal context
+                emergencyFlush();
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    });
 }
 
-CrashHandler::~CrashHandler() {
-    cleanupHandlers();
+void CrashHandler::stopMonitor() {
+    stop_monitor_.store(true);
+    if (monitor_thread_.joinable()) {
+        monitor_thread_.join();
+    }
 }
 
-void CrashHandler::setFlushCallback(FlushCallback callback) {
-    flush_callback_ = callback;
-}
+void CrashHandler::setFlushCallback(FlushCallback callback) { flush_callback_ = std::move(callback); }
 
 void CrashHandler::emergencyFlush() {
+    // Execute user-provided flush callback. Do not allow exceptions to escape.
     if (flush_callback_) {
-        // Call flush callback silently - no exceptions in crash handler
-        flush_callback_();
+        try {
+            flush_callback_();
+        } catch (...) {
+            // Swallow all exceptions in emergency path.
+        }
     }
 }
 
 void CrashHandler::signalHandler(int signal) {
-    // Ignore further signals
+    // Prevent recursive handling for the same signal.
     std::signal(signal, SIG_IGN);
-    
-    std::cerr << "Crash signal received: " << signal << std::endl;
-    std::cerr << "Attempting emergency flush..." << std::endl;
-    
-    // Trigger emergency flush
-    emergencyFlush();
-    
-    // Re-raise signal to allow default handler to run
+
+    // Signal the background monitor to perform the flush. This is async-signal-safe
+    // because it uses an atomic flag.
+    flush_requested_.store(true);
+
+    // Restore default handler and re-raise the signal so process terminates as expected.
     std::signal(signal, SIG_DFL);
     std::raise(signal);
 }
 
 void CrashHandler::initializeHandlers() {
-    if (initialized_.exchange(true)) {
-        return;  // Already initialized
+    bool expected = false;
+    if (!initialized_.compare_exchange_strong(expected, true)) {
+        return;  // Already initialized.
     }
-    
-    // Register signal handlers for crash scenarios
+
 #ifdef SPECKIT_PLATFORM_WINDOWS
-    signal(SIGSEGV, signalHandler);
-    signal(SIGABRT, signalHandler);
+    // Use simple signal() API on Windows.
+    for (int sig : kHandledSignals) {
+        std::signal(sig, signalHandler);
+    }
+    // Start background monitor thread
+    startMonitor();
 #else
-    struct sigaction sa;
+    struct sigaction sa{};
     sa.sa_handler = signalHandler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_RESETHAND;
-    sigaction(SIGSEGV, &sa, nullptr);
-    sigaction(SIGABRT, &sa, nullptr);
+
+    for (int sig : kHandledSignals) {
+        sigaction(sig, &sa, nullptr);
+    }
 #endif
-    
-    initialized_.store(true);
 }
 
 void CrashHandler::cleanupHandlers() {
-    if (!initialized_.exchange(false)) {
-        return;  // Not initialized
+    bool expected = true;
+    if (!initialized_.compare_exchange_strong(expected, false)) {
+        return;  // Not initialized.
     }
-    
-    // Restore default signal handlers
+
 #ifdef SPECKIT_PLATFORM_WINDOWS
-    signal(SIGSEGV, SIG_DFL);
-    signal(SIGABRT, SIG_DFL);
+    for (int sig : kHandledSignals) {
+        std::signal(sig, SIG_DFL);
+    }
+    // Stop background monitor thread
+    stopMonitor();
 #else
-    struct sigaction sa;
+    struct sigaction sa{};
     sa.sa_handler = SIG_DFL;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_RESETHAND;
-    sigaction(SIGSEGV, &sa, nullptr);
-    sigaction(SIGABRT, &sa, nullptr);
+
+    for (int sig : kHandledSignals) {
+        sigaction(sig, &sa, nullptr);
+    }
 #endif
 }
 

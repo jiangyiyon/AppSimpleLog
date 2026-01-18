@@ -2,9 +2,12 @@
 
 #include <string>
 
-namespace speckit { namespace log {
+namespace speckit {
+namespace log {
 
-// Create an archive (ZIP) for baseName log files. Returns true on success.
-bool createArchive(const std::string& baseName, int processId, const std::string& timestamp);
+// Create an archive (ZIP) for log files whose filenames start with `base_name`.
+// Returns true on success.
+bool createArchive(const std::string& base_name, int process_id, const std::string& timestamp);
 
-}} // namespace speckit::log
+}  // namespace log
+}  // namespace speckit

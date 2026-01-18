@@ -29,10 +29,10 @@ protected:
 TEST_F(FileNameGenerationTest, FirstProcess_GeneratesBaseName) {
     // Create file manager with first_process=true
     FileManager file_manager(log_base_path_);
-    ASSERT_TRUE(file_manager.initialize(1234));  // Any process ID
+    ASSERT_TRUE(file_manager.Initialize(1234));  // Any process ID
 
     // Verify base name is used
-    std::string filename = file_manager.getLogFileName();
+    std::string filename = file_manager.GetLogFileName();
     EXPECT_EQ(filename, log_base_path_ + ".log");
 
     // Verify file exists
@@ -45,11 +45,11 @@ TEST_F(FileNameGenerationTest, SubsequentProcess_GeneratesPidName) {
     // by checking if base file exists. Here we test the naming logic.
 
     FileManager file_manager(log_base_path_);
-    ASSERT_TRUE(file_manager.initialize(5678));  // Different process ID
+    ASSERT_TRUE(file_manager.Initialize(5678));  // Different process ID
 
     // If filename_test.log exists, should use PID name
     // This test assumes the file manager logic works correctly
-    std::string filename = file_manager.getLogFileName();
+    std::string filename = file_manager.GetLogFileName();
 
     // Should contain process ID
     if (filename.find("_") != std::string::npos) {
@@ -67,9 +67,9 @@ TEST_F(FileNameGenerationTest, ProcessId_IsIncludedInFilename) {
 
     // If using PID filename
     // Note: This depends on whether it's first or subsequent process
-    ASSERT_TRUE(file_manager.initialize(pid));
+    ASSERT_TRUE(file_manager.Initialize(pid));
 
-    std::string filename = file_manager.getLogFileName();
+    std::string filename = file_manager.GetLogFileName();
 
     // If filename contains underscore, should have PID
     if (filename.find("_") != std::string::npos) {
@@ -81,16 +81,16 @@ TEST_F(FileNameGenerationTest, ProcessId_IsIncludedInFilename) {
 TEST_F(FileNameGenerationTest, DifferentPids_GenerateDifferentFilenames) {
     // Create first file manager
     FileManager file_manager1(log_base_path_);
-    ASSERT_TRUE(file_manager1.initialize(1111));
-    std::string filename1 = file_manager1.getLogFileName();
+    ASSERT_TRUE(file_manager1.Initialize(1111));
+    std::string filename1 = file_manager1.GetLogFileName();
 
     // Clean up first file to simulate subsequent process
     std::filesystem::remove(log_base_path_ + ".log");
 
     // Create second file manager with different PID
     FileManager file_manager2(log_base_path_);
-    ASSERT_TRUE(file_manager2.initialize(2222));
-    std::string filename2 = file_manager2.getLogFileName();
+    ASSERT_TRUE(file_manager2.Initialize(2222));
+    std::string filename2 = file_manager2.GetLogFileName();
 
     // Filenames should be different
     EXPECT_NE(filename1, filename2);

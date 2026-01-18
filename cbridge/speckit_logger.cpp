@@ -37,7 +37,7 @@ SpeckitLogger* speckit_logger_create(const char* config) {
 #endif
 
     impl->fm = std::make_unique<FileManager>(impl->baseName);
-    impl->fm->initialize(impl->processId);
+    impl->fm->Initialize(impl->processId);
     impl->tagFilter = std::make_unique<speckit::log::TagFilter>();
 
     return reinterpret_cast<SpeckitLogger*>(impl);
@@ -61,11 +61,11 @@ SpeckitErrorCode speckit_logger_log(SpeckitLogger* logger, int level,
     std::string out = message;
     out.push_back('\n');
 
-    bool ok = impl->fm->write(out);
+    bool ok = impl->fm->Write(out);
     if (!ok) return SPECKIT_ERROR_FILE_IO;
 
-    if (impl->fm->needsRotation()) {
-        impl->fm->rotate();
+    if (impl->fm->NeedsRotation()) {
+        impl->fm->Rotate();
     }
 
     return SPECKIT_SUCCESS;

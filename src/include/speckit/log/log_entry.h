@@ -21,9 +21,10 @@ struct LogEntry {
 
     /// Constructor with all fields
     LogEntry(LogLevel lvl, int64_t ts, ProcessIdType pid, ThreadIdType tid,
-            std::string_view tg, std::string_view msg)
+        std::string_view tg, std::string_view msg)
         : level(lvl), timestamp_ms(ts), process_id(pid), thread_id(tid),
-          tag(tg), message(msg) {}
+        tag(tg), message(msg) {
+    }
 
     /// Default constructor
     LogEntry() = default;
@@ -31,11 +32,12 @@ struct LogEntry {
     /// Move constructor
     LogEntry(LogEntry&& other) noexcept
         : level(other.level),
-          timestamp_ms(other.timestamp_ms),
-          process_id(other.process_id),
-          thread_id(other.thread_id),
-          tag(other.tag),
-          message(other.message) {}
+        timestamp_ms(other.timestamp_ms),
+        process_id(other.process_id),
+        thread_id(other.thread_id),
+        tag(other.tag),
+        message(other.message) {
+    }
 
     /// Move assignment
     LogEntry& operator=(LogEntry&& other) noexcept {

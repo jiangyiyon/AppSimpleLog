@@ -6,6 +6,8 @@
 #include <functional>
 #include <atomic>
 #include <string>
+#include <thread>
+#include <chrono>
 
 
 
@@ -29,6 +31,12 @@ public:
     /// Trigger emergency flush manually
     static void emergencyFlush();
 
+    /// Start background monitor thread that observes signal requests and performs async flush.
+    void startMonitor();
+
+    /// Stop background monitor thread.
+    void stopMonitor();
+
 private:
     /// Static crash signal handler
     static void signalHandler(int signal);
@@ -41,6 +49,11 @@ private:
 
     static FlushCallback flush_callback_;          ///< Emergency flush callback
     static std::atomic<bool> initialized_;        ///< Handler initialization state
+    static std::atomic<bool> flush_requested_;    ///< Flag set by signal handler to request flush
+
+    // Background monitor thread that performs async flush when flush_requested_ is set.
+    std::thread monitor_thread_;
+    std::atomic<bool> stop_monitor_{false};
 };
 
 

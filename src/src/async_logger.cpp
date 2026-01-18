@@ -5,55 +5,85 @@
 #include "speckit/log/log_entry.h"
 #include <chrono>
 #include <format>
+#include <stop_token>
 #include <thread>
 
 
 
-std::unique_ptr<AsyncLogger> AsyncLogger::create(const std::string& base_name, 
-                                                     size_t queue_size) {
-    return std::unique_ptr<AsyncLogger>(new AsyncLogger(base_name, queue_size));
+std::unique_ptr<AsyncLogger> AsyncLogger::create(const std::string& base_name,
+                                                  size_t queue_size) {
+    auto logger = std::unique_ptr<AsyncLogger>(new AsyncLogger());
+    if (!logger->initialize(base_name, queue_size)) {
+        return nullptr;
+    }
+    return logger;
 }
 
-AsyncLogger::AsyncLogger(const std::string& base_name, size_t queue_size)
-    : process_id_(getProcessId()), queue_size_(queue_size), sem_(0) {
-    
+bool AsyncLogger::initializeComponents(const std::string& base_name, size_t queue_size) {
     // Create components
     file_manager_ = std::make_unique<FileManager>(base_name);
     async_queue_ = std::make_unique<AsyncQueue>(queue_size);
     ring_buffer_ = std::make_unique<RingBuffer>(queue_size);  // Same size for crash safety
     crash_handler_ = std::make_unique<CrashHandler>();
-    
+
     // Initialize file manager
-    if (!file_manager_->initialize(process_id_)) {
-        initialized_ = false;
-        return;
+    if (!file_manager_->Initialize(process_id_)) {
+        return false;
     }
-    
+
     // Set crash handler callback
     crash_handler_->setFlushCallback([this]() { this->emergencyFlush(); });
-    
-    // Start background writer thread
-    running_.store(true);
-    shutdown_requested_.store(false);
-    writer_thread_ = std::jthread([this]() { this->writerThread(); });
-    
+
+    // Start background writer thread with stop token support
+    writer_thread_ = std::jthread([this](std::stop_token st) { this->writerThread(st); });
+
+    return true;
+}
+
+void AsyncLogger::writeEntries(const std::vector<LogEntry>& entries) {
+    if (!file_manager_) return;
+    for (const auto& entry : entries) {
+        std::string formatted = formatLogEntry(entry);
+        file_manager_->Write(formatted);
+    }
+}
+
+AsyncLogger::AsyncLogger()
+    : process_id_(getProcessId()), queue_size_(0), sem_(0) {
+    // Default ctor. Call initialize(...) to set up components.
+}
+
+bool AsyncLogger::initialize(const std::string& base_name, size_t queue_size) {
+    if (initialized_) return true;
+    queue_size_ = queue_size;
+    if (!initializeComponents(base_name, queue_size)) {
+        initialized_ = false;
+        return false;
+    }
     initialized_ = true;
+    return true;
+}
+
+void AsyncLogger::deinitialize() {
+    if (!initialized_) return;
+
+    // Request thread stop and wake it up
+    writer_thread_.request_stop();
+    sem_.release();  // Signal writer thread to wake up
+
+    if (writer_thread_.joinable()) {
+        writer_thread_.join();
+    }
+
+    // Flush any remaining entries
+    flush();
+
+    initialized_ = false;
 }
 
 AsyncLogger::~AsyncLogger() {
-    if (initialized_) {
-        // Request shutdown
-        shutdown_requested_.store(true);
-        sem_.release();  // Signal writer thread to wake up
-        
-        // Wait for writer thread to finish
-        if (writer_thread_.joinable()) {
-            writer_thread_.join();
-        }
-        
-        // Flush any remaining entries
-        flush();
-    }
+    // Ensure resources are released
+    deinitialize();
 }
 
 void AsyncLogger::setLogLevel(LogLevel level) {
@@ -86,12 +116,12 @@ void AsyncLogger::log(LogLevel level, const std::string& tag,
     );
     
     // Try to push to async queue (non-blocking)
-    if (async_queue_->tryPush(entry)) {
+    if (async_queue_->tryPush(std::move(entry))) {
         // Success - notify writer thread
         sem_.release();
     } else {
         // Queue full - try ring buffer for crash safety
-        if (!ring_buffer_->tryPush(entry)) {
+        if (!ring_buffer_->tryPush(std::move(entry))) {
             // Ring buffer also full - silently drop to prevent blocking
             return;
         }
@@ -108,15 +138,8 @@ void AsyncLogger::flush() {
     auto ring_entries = ring_buffer_->popAll();
     
     // Write all entries to file
-    for (const auto& entry : queue_entries) {
-        std::string formatted = formatLogEntry(entry);
-        file_manager_->write(formatted);
-    }
-    
-    for (const auto& entry : ring_entries) {
-        std::string formatted = formatLogEntry(entry);
-        file_manager_->write(formatted);
-    }
+    writeEntries(queue_entries);
+    writeEntries(ring_entries);
     
     // Force file flush
     if (file_manager_) {
@@ -124,13 +147,12 @@ void AsyncLogger::flush() {
     }
 }
 
-void AsyncLogger::writerThread() {
-    while (running_.load()) {
-        // Wait for entries or shutdown request using semaphore
+void AsyncLogger::writerThread(std::stop_token stop_token) {
+    while (!stop_token.stop_requested()) {
+        // Wait for entries or stop request using semaphore
         sem_.acquire();
 
-        // Check for shutdown request
-        if (shutdown_requested_.load()) {
+        if (stop_token.stop_requested()) {
             // Process remaining entries before exiting
             flush();
             break;
@@ -139,8 +161,6 @@ void AsyncLogger::writerThread() {
         // Flush all queued entries
         flush();
     }
-
-    running_.store(false);
 }
 
 void AsyncLogger::emergencyFlush() {
@@ -148,21 +168,18 @@ void AsyncLogger::emergencyFlush() {
     
     // Flush async queue
     auto queue_entries = async_queue_->popAll();
-    for (const auto& entry : queue_entries) {
-        std::string formatted = formatLogEntry(entry);
-        file_manager_->write(formatted);
-    }
+    writeEntries(queue_entries);
     
     // Flush ring buffer
     auto ring_entries = ring_buffer_->popAll();
-    for (const auto& entry : ring_entries) {
-        std::string formatted = formatLogEntry(entry);
-        file_manager_->write(formatted);
-    }
+    writeEntries(ring_entries);
     
     // Force file flush immediately
     // Note: This requires FileManager interface to support immediate flush
     // For now, FileManager handles periodic flushing
+    if (file_manager_) {
+        file_manager_->Flush();
+    }
 }
 
 ProcessIdType AsyncLogger::getProcessId() const {

@@ -1,146 +1,141 @@
 #include "../include/speckit/log/archive.h"
+
 #include <filesystem>
-#include <fstream>
 #include <vector>
 #include <string>
 #include <zip.h>
-#include <cstring>
+#include <system_error>
 
 namespace fs = std::filesystem;
 
 namespace speckit {
-    namespace log {
+namespace log {
 
-        /**
-         * Create a proper ZIP archive containing all .log files matching baseName
-         * Uses libzip library for true compression (DEFLATE algorithm)
-         * Archive filename format: baseName_processId_timestamp.zip
-         *
-         * @param baseName Base name of log files (e.g., "app")
-         * @param processId Process ID for unique identification
-         * @param timestamp Timestamp string for the archive name
-         * @return true on success, false on failure
-         */
-        bool createArchive(const std::string& baseName, int processId, const std::string& timestamp) {
-            try {
-                // Generate archive filename with timestamp
-                std::string archiveName = baseName + "_" + std::to_string(processId) + "_" + timestamp + ".zip";
-                
-                // Validate timestamp is not empty
-                if (timestamp.empty()) {
-                    return false;
-                }
+namespace {  // internal helpers
 
-                // Gather all .log files matching baseName pattern
-                std::vector<fs::path> files;
-                fs::path dir = fs::current_path();
-                
-                // Find all files starting with baseName and ending with .log
-                for (auto& p : fs::directory_iterator(dir)) {
-                    auto name = p.path().filename().string();
-                    if (name.rfind(baseName, 0) == 0 && name.find(".log") != std::string::npos) {
-                        files.push_back(p.path());
-                    }
-                }
-
-                // If no files found, nothing to archive
-                if (files.empty()) {
-                    return false;
-                }
-
-                // Create ZIP archive using libzip
-                // ZIP_CREATE: Create new archive
-                // ZIP_TRUNCATE: If file exists, truncate it
-                // ZIP_EXCL: Fail if archive already exists (for safety)
-                int zipError = 0;
-                zip_t* zipArchive = zip_open(archiveName.c_str(), ZIP_CREATE | ZIP_TRUNCATE, &zipError);
-                
-                if (zipArchive == nullptr) {
-                    // Failed to create archive - get error details
-                    zip_error_t error;
-                    zip_error_init_with_code(&error, zipError);
-                    // Note: In production, you might log this error
-                    zip_error_fini(&error);
-                    return false;
-                }
-
-                // Process each log file and add to archive
-                bool success = true;
-                for (const auto& f : files) {
-                    // Get file size
-                    size_t fileSize = fs::file_size(f);
-                    if (fileSize == 0) {
-                        // Skip empty files
-                        continue;
-                    }
-
-                    // Open source file
-                    std::ifstream in(f, std::ios::binary);
-                    if (!in) {
-                        success = false;
-                        break;
-                    }
-
-                    // Read file content into buffer
-                    std::vector<char> fileData(fileSize);
-                    in.read(fileData.data(), fileSize);
-                    in.close();
-
-                    // Add file to ZIP archive
-                    // zip_file_add(): Add a new file entry to the archive
-                    // ZIP_FL_OVERWRITE: If file already exists in archive, replace it
-                    zip_source_t* source = zip_source_buffer(zipArchive, fileData.data(), fileSize, 0);
-                    if (source == nullptr) {
-                        success = false;
-                        break;
-                    }
-
-                    // Add the file with its original filename
-                    zip_int64_t fileIndex = zip_file_add(zipArchive, f.filename().string().c_str(), source, ZIP_FL_OVERWRITE);
-                    
-                    if (fileIndex < 0) {
-                        zip_source_free(source);  // Clean up source on failure
-                        success = false;
-                        break;
-                    }
-
-                    // Note: libzip uses DEFLATE compression by default, so we don't need to set it explicitly
-                    // For older libzip versions that don't support zip_file_set_compression, this works fine
-                }
-
-                // Close ZIP archive (this writes the actual ZIP file structure)
-                int closeResult = zip_close(zipArchive);
-                
-                if (closeResult != 0 || !success) {
-                    // Archive close failed or file processing failed
-                    // On failure, libzip automatically removes the partially created archive
-                    return false;
-                }
-
-                // Archive created successfully - remove original log files
-                for (const auto& f : files) {
-                    try {
-                        fs::remove(f);
-                    } catch (const std::exception& e) {
-                        // Log error but don't fail the entire operation
-                        // In production, you might want to track this
-                        (void)e;  // Suppress unused variable warning
-                    }
-                }
-
-                return true;
+// Collect all regular files in `dir` that have extension ".log" and whose
+// filename (without directory) starts with the provided base filename.
+std::vector<fs::path> CollectLogFiles(const fs::path& dir, const std::string& base_name) {
+    std::vector<fs::path> result;
+    const std::string base_fname = fs::path(base_name).filename().string();
+    try {
+        for (const auto& entry : fs::directory_iterator(dir)) {
+            if (!entry.is_regular_file()) {
+                continue;
             }
-            catch (const std::exception& e) {
-                // Catch and report exceptions (but not silently swallow them)
-                // In production, you might log this error
-                (void)e;  // Suppress unused variable warning
-                return false;
+            const fs::path& p = entry.path();
+            if (p.extension() != ".log") {
+                continue;
             }
-            catch (...) {
-                // Catch any other unexpected exceptions
-                return false;
+            const std::string fname = p.filename().string();
+            // Match files whose filename starts with base filename.
+            if (fname.rfind(base_fname, 0) == 0) {
+                result.push_back(p);
             }
         }
-
     }
-} // namespace speckit::log
+    catch (const std::exception&) {
+        // On error (permission, etc.) return what we have (possibly empty).
+    }
+    return result;
+}
+
+// (Removed) ReadFileToBuffer: we now use libzip file-backed sources to avoid
+// loading file contents into memory.
+
+// RAII wrapper for libzip archive handle: discard on destruction unless closed.
+struct ZipGuard {
+    explicit ZipGuard(zip_t* z) noexcept : zip(z), closed(false) {}
+    ~ZipGuard() noexcept {
+        if (zip == nullptr) return;
+        if (!closed) {
+            zip_discard(zip);
+        }
+    }
+    // Close (write) the archive. Returns zip_close() result or -1 if no zip.
+    int Close() noexcept {
+        if (zip == nullptr) return -1;
+        const int res = zip_close(zip);
+        closed = (res == 0);
+        return res;
+    }
+    zip_t* zip;
+private:
+    bool closed;
+};
+
+}  // namespace (helpers)
+
+bool createArchive(const std::string& base_name, int process_id, const std::string& timestamp) {
+    // Validate inputs early.
+    if (timestamp.empty() || base_name.empty()) {
+        return false;
+    }
+
+    // Build archive filename.
+    const std::string archive_name = base_name + "_" + std::to_string(process_id) + "_" + timestamp + ".zip";
+
+    // Collect candidate log files from current directory that start with base_name.
+    const fs::path cwd = fs::current_path();
+    const std::vector<fs::path> candidates = CollectLogFiles(cwd, base_name);
+    if (candidates.empty()) {
+        return false;
+    }
+
+    // Open ZIP archive. Create/truncate existing archive.
+    int zip_error = 0;
+    zip_t* raw_zip = zip_open(archive_name.c_str(), ZIP_CREATE | ZIP_TRUNCATE, &zip_error);
+    if (raw_zip == nullptr) {
+        // Creation failed (could inspect zip_error for logging).
+        return false;
+    }
+    ZipGuard zip(raw_zip);
+
+    bool had_nonempty = false;
+    for (const auto& f : candidates) {
+        std::error_code ec;
+        const auto sz = fs::file_size(f, ec);
+        if (ec) {
+            // Skip unreadable file.
+            continue;
+        }
+        if (sz == 0) {
+            // Ignore empty files per tests/requirements.
+            continue;
+        }
+
+        // Use libzip's file-backed source to avoid loading entire file into memory.
+        // zip_source_file(zip_t*, const char* path, zip_uint64_t start, zip_int64_t len)
+        // Passing 0 and -1 reads the whole file.
+        zip_source_t* source = zip_source_file(zip.zip, f.string().c_str(), 0, -1);
+        if (source == nullptr) {
+            return false;
+        }
+
+        const std::string filename_in_zip = f.filename().string();
+        zip_int64_t idx = zip_file_add(zip.zip, filename_in_zip.c_str(), source, ZIP_FL_OVERWRITE);
+        if (idx < 0) {
+            zip_source_free(source);
+            return false;
+        }
+
+        had_nonempty = true;
+    }
+
+    if (!had_nonempty) {
+        // No non-empty files to archive -> do not create archive.
+        return false;
+    }
+
+    // Close (write) the archive. If this fails, ZipGuard will discard in destructor.
+    if (zip.Close() != 0) {
+        return false;
+    }
+
+    // NOTE: 按用户要求，打包完成后不要删除原始文件。保留原文件供后续分析/调试。
+
+    return true;
+}
+
+}  // namespace log
+}  // namespace speckit

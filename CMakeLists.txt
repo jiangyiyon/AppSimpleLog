@@ -163,32 +163,53 @@ if(BUILD_TESTING)
         if(EXISTS "${CMAKE_SOURCE_DIR}/third_party/googletest/googletest/include/gtest/gtest.h")
             # Use integrated GTest source
             add_executable(unit_tests ${UNIT_TEST_SOURCES} ${GTEST_SOURCES} ${GTEST_MAIN_SOURCE})
-            target_link_libraries(unit_tests SpeckitLog)
+            target_link_libraries(unit_tests PRIVATE SpeckitLog)
         else()
             # Use installed GTest
             add_executable(unit_tests ${UNIT_TEST_SOURCES})
-            target_link_libraries(unit_tests GTest::gtest GTest::gtest_main SpeckitLog)
+            target_link_libraries(unit_tests PRIVATE GTest::gtest GTest::gtest_main SpeckitLog)
         endif()
+        
+        # Add libzip and zlib to unit tests (needed for test_archive.cpp)
+        if(WIN32 AND EXISTS "${LIBZIP_LIB}" AND EXISTS "${ZLIB_LIB}")
+            target_include_directories(unit_tests PRIVATE ${LIBZIP_INCLUDE_DIR} ${ZLIB_INCLUDE_DIR})
+            target_link_libraries(unit_tests PRIVATE ${LIBZIP_LIB} ${ZLIB_LIB})
+        endif()
+        
         add_test(NAME unit_tests COMMAND unit_tests)
 
         # Integration tests executable
         if(EXISTS "${CMAKE_SOURCE_DIR}/third_party/googletest/googletest/include/gtest/gtest.h")
             add_executable(integration_tests ${INTEGRATION_TEST_SOURCES} ${GTEST_SOURCES} ${GTEST_MAIN_SOURCE})
-            target_link_libraries(integration_tests SpeckitLog SpeckitBridge)
+            target_link_libraries(integration_tests PRIVATE SpeckitLog SpeckitBridge)
         else()
             add_executable(integration_tests ${INTEGRATION_TEST_SOURCES})
-            target_link_libraries(integration_tests GTest::gtest GTest::gtest_main SpeckitLog SpeckitBridge)
+            target_link_libraries(integration_tests PRIVATE GTest::gtest GTest::gtest_main SpeckitLog SpeckitBridge)
         endif()
+        
+        # Add libzip and zlib to integration tests (needed for archive functionality)
+        if(WIN32 AND EXISTS "${LIBZIP_LIB}" AND EXISTS "${ZLIB_LIB}")
+            target_include_directories(integration_tests PRIVATE ${LIBZIP_INCLUDE_DIR} ${ZLIB_INCLUDE_DIR})
+            target_link_libraries(integration_tests PRIVATE ${LIBZIP_LIB} ${ZLIB_LIB})
+        endif()
+        
         add_test(NAME integration_tests COMMAND integration_tests)
 
         # Performance tests executable
         if(EXISTS "${CMAKE_SOURCE_DIR}/third_party/googletest/googletest/include/gtest/gtest.h")
             add_executable(performance_tests ${PERFORMANCE_TEST_SOURCES} ${GTEST_SOURCES} ${GTEST_MAIN_SOURCE})
-            target_link_libraries(performance_tests SpeckitLog)
+            target_link_libraries(performance_tests PRIVATE SpeckitLog)
         else()
             add_executable(performance_tests ${PERFORMANCE_TEST_SOURCES})
-            target_link_libraries(performance_tests GTest::gtest GTest::gtest_main SpeckitLog)
+            target_link_libraries(performance_tests PRIVATE GTest::gtest GTest::gtest_main SpeckitLog)
         endif()
+        
+        # Add libzip and zlib to performance tests (needed for archive functionality)
+        if(WIN32 AND EXISTS "${LIBZIP_LIB}" AND EXISTS "${ZLIB_LIB}")
+            target_include_directories(performance_tests PRIVATE ${LIBZIP_INCLUDE_DIR} ${ZLIB_INCLUDE_DIR})
+            target_link_libraries(performance_tests PRIVATE ${LIBZIP_LIB} ${ZLIB_LIB})
+        endif()
+        
         add_test(NAME performance_tests COMMAND performance_tests)
     else()
         message(WARNING "GTest not found. Tests will not be built. Please install GTest or set BUILD_TESTING=OFF")

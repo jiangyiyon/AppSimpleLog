@@ -28,9 +28,18 @@ protected:
     }
 
     void cleanupTestFiles() {
-        std::filesystem::remove_all(log_base_path_ + ".log");
-        std::filesystem::remove_all(log_base_path_ + "_*.log");
-        std::filesystem::remove_all(log_base_path_ + "_*.zip");
+        // remove files matching base name prefix (remove_all does not accept globs)
+        const std::filesystem::path cwd = std::filesystem::current_path();
+        const std::string base_fname = std::filesystem::path(log_base_path_).filename().string();
+        for (const auto& entry : std::filesystem::directory_iterator(cwd)) {
+            if (!entry.is_regular_file()) continue;
+            const std::string name = entry.path().filename().string();
+            if (name.rfind(base_fname, 0) == 0) {
+                // starts with base name
+                std::error_code ec;
+                std::filesystem::remove(entry.path(), ec);
+            }
+        }
     }
 
     void createTestLogFile(const std::string& filename, const std::string& content) {
@@ -74,7 +83,7 @@ TEST_F(ArchiveTest, CreateArchive_CreatesZipFile) {
     EXPECT_TRUE(std::filesystem::exists(archiveName));
 }
 
-TEST_F(ArchiveTest, CreateArchive_RemovesOriginalFiles) {
+TEST_F(ArchiveTest, CreateArchive_OriginalFilesRemain) {
     // Create test log files
     createTestLogFile(log_base_path_ + ".log", "Main log content\n");
     createTestLogFile(log_base_path_ + ".1.log", "First rotated log\n");
@@ -86,9 +95,9 @@ TEST_F(ArchiveTest, CreateArchive_RemovesOriginalFiles) {
     bool result = speckit::log::createArchive(log_base_path_, 5678, timestamp);
     ASSERT_TRUE(result);
 
-    // Verify original log files are removed
-    EXPECT_FALSE(std::filesystem::exists(log_base_path_ + ".log"));
-    EXPECT_FALSE(std::filesystem::exists(log_base_path_ + ".1.log"));
+    // Verify original log files are still present (do not delete originals)
+    EXPECT_TRUE(std::filesystem::exists(log_base_path_ + ".log"));
+    EXPECT_TRUE(std::filesystem::exists(log_base_path_ + ".1.log"));
 }
 
 TEST_F(ArchiveTest, CreateArchive_WithNoFiles_FailsGracefully) {
@@ -192,4 +201,160 @@ TEST_F(ArchiveTest, CreateArchive_MultipleFiles_AllIncluded) {
     // For now, we just verify the archive was created
     std::string archiveName = log_base_path_ + "_5555_" + timestamp + ".zip";
     EXPECT_TRUE(std::filesystem::exists(archiveName));
+}
+
+TEST_F(ArchiveTest, CreateArchive_ZipContent_Verifiable) {
+    // Create test log files
+    createTestLogFile(log_base_path_ + ".log", "Main log content\n");
+    createTestLogFile(log_base_path_ + ".1.log", "First rotated log\n");
+
+    // Generate timestamp
+    std::string timestamp = generateTimestamp();
+
+    // Create archive
+    bool result = speckit::log::createArchive(log_base_path_, 6666, timestamp);
+    ASSERT_TRUE(result);
+
+    // Open and verify ZIP content
+    std::string archiveName = log_base_path_ + "_6666_" + timestamp + ".zip";
+    int zipError = 0;
+    zip_t* zipArchive = zip_open(archiveName.c_str(), 0, &zipError);
+    
+    ASSERT_NE(zipArchive, nullptr) << "Failed to open ZIP archive";
+
+    // Count number of files in archive
+    zip_int64_t numEntries = zip_get_num_entries(zipArchive, 0);
+    EXPECT_EQ(numEntries, 2) << "Archive should contain 2 files";
+
+    // Close ZIP archive
+    zip_close(zipArchive);
+}
+
+TEST_F(ArchiveTest, CreateArchive_RepeatedCall_OverwritesExisting) {
+    // Create first set of log files
+    createTestLogFile(log_base_path_ + ".log", "First content\n");
+    
+    // Generate timestamp for first archive
+    std::string timestamp = generateTimestamp();
+
+    // Create first archive
+    bool result1 = speckit::log::createArchive(log_base_path_, 7777, timestamp);
+    ASSERT_TRUE(result1);
+
+    // Create second set of log files
+    createTestLogFile(log_base_path_ + ".log", "Second content\n");
+
+    // Create second archive with same name (should overwrite)
+    bool result2 = speckit::log::createArchive(log_base_path_, 7777, timestamp);
+    EXPECT_TRUE(result2);
+}
+
+TEST_F(ArchiveTest, CreateArchive_DifferentBaseName_FilterCorrectly) {
+    // Create files with different base names
+    createTestLogFile(log_base_path_ + ".log", "Should be archived\n");
+    createTestLogFile("other_app.log", "Should NOT be archived\n");
+    createTestLogFile("app_test.log", "Should NOT be archived (not starting with baseName)\n");
+
+    // Generate timestamp
+    std::string timestamp = generateTimestamp();
+
+    // Create archive with specific base name
+    bool result = speckit::log::createArchive(log_base_path_, 8888, timestamp);
+    ASSERT_TRUE(result);
+
+    // Verify only files with matching baseName are archived
+    std::string archiveName = log_base_path_ + "_8888_" + timestamp + ".zip";
+    ASSERT_TRUE(std::filesystem::exists(archiveName));
+
+    // Open ZIP and count entries
+    int zipError = 0;
+    zip_t* zipArchive = zip_open(archiveName.c_str(), 0, &zipError);
+    ASSERT_NE(zipArchive, nullptr);
+
+    zip_int64_t numEntries = zip_get_num_entries(zipArchive, 0);
+    EXPECT_EQ(numEntries, 1) << "Should only archive files starting with baseName";
+
+    zip_close(zipArchive);
+}
+
+TEST_F(ArchiveTest, CreateArchive_BinaryFiles_HandlesCorrectly) {
+    // Create log file with binary-like content
+    std::string binaryContent;
+    for (int i = 0; i < 256; i++) {
+        binaryContent.push_back(static_cast<char>(i));
+    }
+    createTestLogFile(log_base_path_ + ".log", binaryContent);
+
+    // Generate timestamp
+    std::string timestamp = generateTimestamp();
+
+    // Create archive
+    bool result = speckit::log::createArchive(log_base_path_, 9999, timestamp);
+    
+    // Verify archive creation succeeded
+    EXPECT_TRUE(result);
+
+    // Verify ZIP file exists
+    std::string archiveName = log_base_path_ + "_9999_" + timestamp + ".zip";
+    EXPECT_TRUE(std::filesystem::exists(archiveName));
+}
+
+TEST_F(ArchiveTest, CreateArchive_SmallFiles_Succeeds) {
+    // Create very small log files (single byte)
+    createTestLogFile(log_base_path_ + ".log", "A");
+    createTestLogFile(log_base_path_ + ".1.log", "B");
+
+    // Generate timestamp
+    std::string timestamp = generateTimestamp();
+
+    // Create archive
+    bool result = speckit::log::createArchive(log_base_path_, 1001, timestamp);
+    
+    // Verify archive creation succeeded
+    EXPECT_TRUE(result);
+
+    // Verify ZIP file exists
+    std::string archiveName = log_base_path_ + "_1001_" + timestamp + ".zip";
+    EXPECT_TRUE(std::filesystem::exists(archiveName));
+}
+
+TEST_F(ArchiveTest, CreateArchive_UnicodeFileNames_HandlesCorrectly) {
+    // Create log file with baseName that includes unicode characters
+    std::string unicodeContent = "Test content with unicode: 你好\n";
+    createTestLogFile(log_base_path_ + ".log", unicodeContent);
+
+    // Generate timestamp
+    std::string timestamp = generateTimestamp();
+
+    // Create archive
+    bool result = speckit::log::createArchive(log_base_path_, 2002, timestamp);
+    
+    // Verify archive creation succeeded
+    EXPECT_TRUE(result);
+
+    // Verify ZIP file exists
+    std::string archiveName = log_base_path_ + "_2002_" + timestamp + ".zip";
+    EXPECT_TRUE(std::filesystem::exists(archiveName));
+}
+
+TEST_F(ArchiveTest, CreateArchive_ProcessId_Uniqueness) {
+    // Create test log files
+    createTestLogFile(log_base_path_ + ".log", "Process 1 content\n");
+
+    // Generate timestamp
+    std::string timestamp = generateTimestamp();
+
+    // Create archives with different process IDs
+    bool result1 = speckit::log::createArchive(log_base_path_, 3001, timestamp);
+    bool result2 = speckit::log::createArchive(log_base_path_, 3002, timestamp);
+
+    // Both should succeed (different process IDs create different archive names)
+    EXPECT_TRUE(result1);
+    EXPECT_TRUE(result2);
+
+    // Both ZIP files should exist
+    std::string archive1 = log_base_path_ + "_3001_" + timestamp + ".zip";
+    std::string archive2 = log_base_path_ + "_3002_" + timestamp + ".zip";
+    EXPECT_TRUE(std::filesystem::exists(archive1));
+    EXPECT_TRUE(std::filesystem::exists(archive2));
 }
