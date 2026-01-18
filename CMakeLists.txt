@@ -27,8 +27,8 @@ set(LOG_LIB_SOURCES
     src/src/async_logger.cpp
     src/src/async_queue.cpp
     src/src/crash_handler.cpp
-    src/src/archive.cpp
     src/src/tag_filter.cpp
+    src/src/archive.cpp
 )
 
 # C bridge source files
@@ -43,7 +43,7 @@ target_include_directories(SpeckitLog PUBLIC ${CMAKE_SOURCE_DIR}/src/include)
 # Create the C bridge library
 add_library(SpeckitBridge SHARED ${CBRIDGE_SOURCES})
 target_include_directories(SpeckitBridge PUBLIC ${CMAKE_SOURCE_DIR}/cbridge)
-target_link_libraries(SpeckitBridge SpeckitLog)
+target_link_libraries(SpeckitBridge PRIVATE SpeckitLog)
 
 # Define export macro for Windows
 if(WIN32)
@@ -52,9 +52,56 @@ endif()
 
 # Platform-specific linking
 if(WIN32)
-    target_link_libraries(SpeckitLog PRIVATE)
+    # Use local libzip library from third_party
+    set(LIBZIP_ROOT "${CMAKE_SOURCE_DIR}/third_party/libzip_x64-windows")
+    set(LIBZIP_INCLUDE_DIR "${LIBZIP_ROOT}/include")
+    set(LIBZIP_LIB_DIR "${LIBZIP_ROOT}/lib")
+    set(LIBZIP_LIB "${LIBZIP_LIB_DIR}/zip.lib")
+
+    # Check if libzip files exist
+    if(EXISTS "${LIBZIP_LIB}" AND EXISTS "${LIBZIP_INCLUDE_DIR}/zip.h")
+        message(STATUS "Found local libzip: ${LIBZIP_ROOT}")
+        target_include_directories(SpeckitLog PRIVATE ${LIBZIP_INCLUDE_DIR})
+        target_link_libraries(SpeckitLog PRIVATE ${LIBZIP_LIB})
+        # SpeckitBridge also needs libzip for archive functionality
+        target_link_libraries(SpeckitBridge PRIVATE ${LIBZIP_LIB})
+    else()
+        message(FATAL_ERROR "libzip not found in ${LIBZIP_ROOT}. Please download libzip to third_party/libzip_x64-windows/")
+    endif()
+
+    # Also link zlib (required by libzip)
+    set(ZLIB_ROOT "${CMAKE_SOURCE_DIR}/third_party/zlib_x64-windows")
+    set(ZLIB_INCLUDE_DIR "${ZLIB_ROOT}/include")
+    set(ZLIB_LIB_DIR "${ZLIB_ROOT}/lib")
+    set(ZLIB_LIB "${ZLIB_LIB_DIR}/zlib.lib")
+
+    if(EXISTS "${ZLIB_LIB}")
+        message(STATUS "Found local zlib: ${ZLIB_ROOT}")
+        target_include_directories(SpeckitLog PRIVATE ${ZLIB_INCLUDE_DIR})
+        target_link_libraries(SpeckitLog PRIVATE ${ZLIB_LIB})
+        # SpeckitBridge also needs zlib
+        target_link_libraries(SpeckitBridge PRIVATE ${ZLIB_LIB})
+    else()
+        message(WARNING "zlib not found in ${ZLIB_ROOT}. libzip may fail to link.")
+    endif()
 else()
     target_link_libraries(SpeckitLog PRIVATE pthread z)
+    # Add libzip library for macOS/Linux
+    find_package(PkgConfig QUIET)
+    if(PKG_CONFIG_FOUND)
+        pkg_check_modules(LIBZIP IMPORTED_TARGET libzip)
+        if(TARGET PkgConfig::LIBZIP)
+            target_link_libraries(SpeckitLog PRIVATE PkgConfig::LIBZIP)
+        else()
+            # Fallback: try to find libzip manually
+            find_library(LIBZIP_LIB zip)
+            if(LIBZIP_LIB)
+                target_link_libraries(SpeckitLog PRIVATE ${LIBZIP_LIB})
+            else()
+                message(WARNING "libzip not found. Archive functionality may not work. Please install libzip.")
+            endif()
+        endif()
+    endif()
     target_link_libraries(SpeckitBridge PRIVATE pthread z)
 endif()
 
@@ -97,6 +144,7 @@ if(BUILD_TESTING)
             tests/unit/test_async_logging.cpp
             tests/unit/test_async_queue.cpp
             tests/unit/test_process_isolation.cpp
+            tests/unit/test_archive.cpp
         )
 
         # Integration test sources - Updated to match actual files
